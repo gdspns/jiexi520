@@ -579,6 +579,7 @@
             try {
                 currentSingleData = await fetchVideoDataAPI(urls[0]);
                 renderSingleResult(currentSingleData);
+                if (window.__consumeCredit) await window.__consumeCredit();
             } catch (err) {
                 showToast(err.message, 'error');
             } finally {
@@ -686,6 +687,7 @@
                     const data = await fetchVideoDataAPI(url);
                     batchResultsData.push(data);
                     appendBatchResult(data, i+1, 'success');
+                    if (window.__consumeCredit) await window.__consumeCredit();
                 } catch (err) {
                     appendBatchResult({ original_url: url, title: `解析失败: ${err.message}` }, i+1, 'error');
                 }
