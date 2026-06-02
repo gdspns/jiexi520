@@ -916,5 +916,89 @@
             return `${Math.floor(s/60)}:${Math.floor(s%60).toString().padStart(2,'0')}`;
         }
     </script>
+    <!-- ============ 登录鉴权层 ============ -->
+    <div id="auth-bar" style="position:fixed;top:12px;right:12px;z-index:9999;display:flex;gap:8px;align-items:center;font-family:Inter,sans-serif;"></div>
+    <script type="module">
+      import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+      const SUPABASE_URL = "https://cbxenoebinlmdmaqelyv.supabase.co";
+      const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNieGVub2ViaW5sbWRtYXFlbHl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0MDcyNzAsImV4cCI6MjA5NTk4MzI3MH0.s8NuyIZSkaVqkAm63RV3nrg60Jyiu9i4mPg13MxfGLU";
+      const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: { persistSession: true, storage: localStorage, storageKey: "sb-cbxenoebinlmdmaqelyv-auth-token" }
+      });
+      window.__sb = sb;
+      let currentUser = null;
+      let isAdmin = false;
+
+      const bar = document.getElementById("auth-bar");
+      const btnStyle = "padding:6px 14px;border-radius:8px;font-size:13px;font-weight:600;border:1px solid #475569;background:rgba(15,23,42,0.7);color:#f8fafc;cursor:pointer;backdrop-filter:blur(8px);";
+      const primaryStyle = btnStyle + "background:linear-gradient(to right,#db2777,#9333ea);border-color:transparent;";
+
+      function renderBar() {
+        bar.innerHTML = "";
+        if (!currentUser) {
+          const a = document.createElement("a");
+          a.textContent = "登录 / 注册";
+          a.href = "/auth?redirect=" + encodeURIComponent(location.pathname);
+          a.style.cssText = primaryStyle + "text-decoration:none;display:inline-block;";
+          bar.appendChild(a);
+          return;
+        }
+        const tag = document.createElement("span");
+        tag.textContent = currentUser.email;
+        tag.style.cssText = "color:#cbd5e1;font-size:12px;padding:6px 10px;background:rgba(15,23,42,0.7);border-radius:8px;border:1px solid #334155;";
+        bar.appendChild(tag);
+        if (isAdmin) {
+          const adm = document.createElement("a");
+          adm.textContent = "管理后台";
+          adm.href = "/admin";
+          adm.style.cssText = btnStyle + "text-decoration:none;color:#f9a8d4;border-color:#db2777;";
+          bar.appendChild(adm);
+        }
+        const out = document.createElement("button");
+        out.textContent = "退出";
+        out.style.cssText = btnStyle;
+        out.onclick = async () => { await sb.auth.signOut(); location.reload(); };
+        bar.appendChild(out);
+      }
+
+      async function refreshAuth() {
+        const { data } = await sb.auth.getUser();
+        currentUser = data.user || null;
+        isAdmin = false;
+        if (currentUser) {
+          const { data: roles } = await sb.from("user_roles").select("role").eq("user_id", currentUser.id);
+          isAdmin = !!roles?.some(r => r.role === "admin");
+        }
+        renderBar();
+      }
+      sb.auth.onAuthStateChange(() => refreshAuth());
+      refreshAuth();
+
+      function requireLogin(actionLabel) {
+        if (currentUser) return true;
+        const ok = confirm(`使用「${actionLabel}」功能需要先登录账号。\n\n点击「确定」前往登录页。`);
+        if (ok) location.href = "/auth?redirect=" + encodeURIComponent(location.pathname);
+        return false;
+      }
+      window.__requireLogin = requireLogin;
+
+      // 拦截：单链接解析表单提交
+      document.getElementById("convert-form")?.addEventListener("submit", (e) => {
+        if (!requireLogin("解析音频")) { e.preventDefault(); e.stopImmediatePropagation(); }
+      }, true);
+
+      // 拦截：批量解析按钮
+      document.getElementById("batch-submit-btn")?.addEventListener("click", (e) => {
+        if (!requireLogin("批量解析")) { e.preventDefault(); e.stopImmediatePropagation(); }
+      }, true);
+
+      // 拦截：本地文件选择（点击触发文件选择对话框前拦截）
+      const fi = document.getElementById("local-file-input");
+      if (fi) {
+        fi.addEventListener("click", (e) => {
+          if (!requireLogin("本地转换")) { e.preventDefault(); e.stopImmediatePropagation(); }
+        }, true);
+      }
+    </script>
 </body>
 </html>
