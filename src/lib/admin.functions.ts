@@ -21,7 +21,7 @@ export const listUsers = createServerFn({ method: "GET" })
 
     const { data: profiles, error } = await supabaseAdmin
       .from("profiles")
-      .select("id, email, banned, created_at")
+      .select("id, email, banned, credits, created_at")
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
 
@@ -42,6 +42,7 @@ export const listUsers = createServerFn({ method: "GET" })
         id: p.id,
         email: p.email,
         banned: p.banned,
+        credits: p.credits ?? 0,
         created_at: p.created_at,
         last_sign_in_at: au?.last_sign_in_at ?? null,
         roles: roleMap.get(p.id) || [],
@@ -83,4 +84,20 @@ export const deleteUser = createServerFn({ method: "POST" })
     const { error } = await supabaseAdmin.auth.admin.deleteUser(data.userId);
     if (error) throw new Error(error.message);
     return { ok: true };
+  });
+
+export const adjustCredits = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({ userId: z.string().uuid(), delta: z.number().int() }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    const { data: result, error } = await supabase.rpc("admin_adjust_credits", {
+      _user_id: data.userId,
+      _delta: data.delta,
+    });
+    if (error) throw new Error(error.message);
+    return { credits: result as number };
   });

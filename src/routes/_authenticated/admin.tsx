@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { listUsers, setBanned, deleteUser } from "@/lib/admin.functions";
+import { listUsers, setBanned, deleteUser, adjustCredits } from "@/lib/admin.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated/admin")({
@@ -24,6 +24,7 @@ function AdminPage() {
   const list = useServerFn(listUsers);
   const ban = useServerFn(setBanned);
   const del = useServerFn(deleteUser);
+  const adj = useServerFn(adjustCredits);
   const [busy, setBusy] = useState<string | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
@@ -47,6 +48,25 @@ function AdminPage() {
     setBusy(id);
     try {
       await del({ data: { userId: id } });
+      await refetch();
+    } catch (e: any) {
+      alert(e?.message || "操作失败");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onAdjust = async (id: string, delta: number) => {
+    let d = delta;
+    if (delta === 0) {
+      const v = prompt("输入增减次数（正数增加，负数减少）", "10");
+      if (!v) return;
+      d = parseInt(v, 10);
+      if (!Number.isFinite(d) || d === 0) return;
+    }
+    setBusy(id);
+    try {
+      await adj({ data: { userId: id, delta: d } });
       await refetch();
     } catch (e: any) {
       alert(e?.message || "操作失败");
@@ -81,6 +101,7 @@ function AdminPage() {
                 <tr>
                   <th className="text-left px-4 py-3">邮箱</th>
                   <th className="text-left px-4 py-3">角色</th>
+                  <th className="text-left px-4 py-3">剩余次数</th>
                   <th className="text-left px-4 py-3">注册时间</th>
                   <th className="text-left px-4 py-3">最近登录</th>
                   <th className="text-left px-4 py-3">状态</th>
@@ -97,6 +118,26 @@ function AdminPage() {
                       ) : (
                         <span className="px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-xs">user</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        <button
+                          disabled={busy === u.id}
+                          onClick={() => onAdjust(u.id, -1)}
+                          className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-xs disabled:opacity-50"
+                        >−</button>
+                        <span className={`px-2 font-mono text-sm ${u.credits === 0 ? "text-red-400" : "text-slate-200"}`}>{u.credits}</span>
+                        <button
+                          disabled={busy === u.id}
+                          onClick={() => onAdjust(u.id, 1)}
+                          className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-xs disabled:opacity-50"
+                        >+</button>
+                        <button
+                          disabled={busy === u.id}
+                          onClick={() => onAdjust(u.id, 0)}
+                          className="ml-1 px-2 h-6 rounded bg-slate-800 hover:bg-slate-700 text-xs disabled:opacity-50"
+                        >自定义</button>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-slate-400">{new Date(u.created_at).toLocaleString("zh-CN")}</td>
                     <td className="px-4 py-3 text-slate-400">{u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleString("zh-CN") : "—"}</td>
@@ -126,7 +167,7 @@ function AdminPage() {
                   </tr>
                 ))}
                 {data.length === 0 && (
-                  <tr><td colSpan={6} className="text-center text-slate-500 py-8">暂无用户</td></tr>
+                  <tr><td colSpan={7} className="text-center text-slate-500 py-8">暂无用户</td></tr>
                 )}
               </tbody>
             </table>
