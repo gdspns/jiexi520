@@ -101,3 +101,30 @@ export const adjustCredits = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { credits: result as number };
   });
+
+export const getSignupBonus = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    const { data, error } = await supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "signup_bonus_credits")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return { value: Number(data?.value ?? 10) };
+  });
+
+export const setSignupBonus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => z.object({ value: z.number().int().min(0).max(100000) }).parse(input))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    const { error } = await supabase
+      .from("app_settings")
+      .upsert({ key: "signup_bonus_credits", value: data.value as any, updated_at: new Date().toISOString() });
+    if (error) throw new Error(error.message);
+    return { value: data.value };
+  });

@@ -1,8 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { listUsers, setBanned, deleteUser, adjustCredits } from "@/lib/admin.functions";
+import { useEffect, useState } from "react";
+import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus } from "@/lib/admin.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated/admin")({
@@ -25,7 +25,29 @@ function AdminPage() {
   const ban = useServerFn(setBanned);
   const del = useServerFn(deleteUser);
   const adj = useServerFn(adjustCredits);
+  const getBonus = useServerFn(getSignupBonus);
+  const saveBonus = useServerFn(setSignupBonus);
   const [busy, setBusy] = useState<string | null>(null);
+  const [bonus, setBonus] = useState<number | "">("");
+  const [savingBonus, setSavingBonus] = useState(false);
+
+  useEffect(() => {
+    getBonus().then((r) => setBonus(r.value)).catch(() => {});
+  }, []);
+
+  const onSaveBonus = async () => {
+    const v = typeof bonus === "number" ? bonus : parseInt(String(bonus), 10);
+    if (!Number.isFinite(v) || v < 0) return alert("请输入 0 或正整数");
+    setSavingBonus(true);
+    try {
+      await saveBonus({ data: { value: v } });
+      alert(`已保存：新用户注册赠送 ${v} 次`);
+    } catch (e: any) {
+      alert(e?.message || "保存失败");
+    } finally {
+      setSavingBonus(false);
+    }
+  };
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["admin-users"],
@@ -92,6 +114,29 @@ function AdminPage() {
         </div>
       </header>
       <main className="max-w-6xl mx-auto px-4 py-6">
+        <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+          <h2 className="text-base font-bold mb-1">注册赠送设置</h2>
+          <p className="text-xs text-slate-400 mb-3">新用户注册成功后自动赠送的解析次数（管理员账号始终不限）。</p>
+          <div className="flex items-center gap-3">
+            <label className="text-sm text-slate-300">默认赠送：</label>
+            <input
+              type="number"
+              min={0}
+              value={bonus}
+              onChange={(e) => setBonus(e.target.value === "" ? "" : parseInt(e.target.value, 10))}
+              className="w-28 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm focus:outline-none focus:border-pink-500"
+            />
+            <span className="text-sm text-slate-400">次</span>
+            <button
+              onClick={onSaveBonus}
+              disabled={savingBonus || bonus === ""}
+              className="ml-2 px-4 py-2 rounded-lg bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white text-sm font-semibold disabled:opacity-50"
+            >
+              {savingBonus ? "保存中..." : "保存"}
+            </button>
+          </div>
+        </section>
+
         {isLoading && <p className="text-slate-400">加载中...</p>}
         {error && <p className="text-red-400">加载失败：{(error as Error).message}</p>}
         {data && (
