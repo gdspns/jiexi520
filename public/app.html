@@ -976,8 +976,16 @@
 
       function requireLogin(actionLabel) {
         if (currentUser) return true;
-        const ok = confirm(`使用「${actionLabel}」功能需要先登录账号。\n\n点击「确定」前往登录页。`);
-        if (ok) location.href = "/auth?redirect=" + encodeURIComponent(location.pathname);
+        const modal = document.getElementById("login-modal");
+        const msg = document.getElementById("login-modal-msg");
+        const okBtn = document.getElementById("login-modal-ok");
+        const cancelBtn = document.getElementById("login-modal-cancel");
+        if (msg) msg.textContent = `使用「${actionLabel}」功能需要先登录账号。`;
+        if (modal) modal.classList.remove("hidden");
+        const redirect = () => { location.href = "/auth?redirect=" + encodeURIComponent(location.pathname); };
+        const close = () => { if (modal) modal.classList.add("hidden"); };
+        okBtn.onclick = redirect;
+        cancelBtn.onclick = close;
         return false;
       }
       window.__requireLogin = requireLogin;
