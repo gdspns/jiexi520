@@ -678,7 +678,7 @@
 
             for (let i = 0; i < batchPendingUrls.length; i++) {
                 const url = batchPendingUrls[i];
-                if (!isAdmin && userCredits !== null && userCredits <= 0) {
+                if (!window.__isAdmin && typeof window.__userCredits === 'number' && window.__userCredits <= 0) {
                     showToast(`次数不足，已停止后续解析（剩余 ${batchPendingUrls.length - i} 条未处理），请充值`, 'error');
                     break;
                 }
