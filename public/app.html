@@ -1004,6 +1004,8 @@
           const { data: prof } = await sb.from("profiles").select("credits").eq("id", currentUser.id).maybeSingle();
           userCredits = prof?.credits ?? 0;
         }
+        window.__isAdmin = isAdmin;
+        window.__userCredits = userCredits;
         renderBar();
       }
       sb.auth.onAuthStateChange((_event, session) => {
@@ -1042,6 +1044,7 @@
           const { data, error } = await sb.rpc("consume_credit");
           if (error) throw error;
           userCredits = data;
+          window.__userCredits = userCredits;
           renderBar();
         } catch (e) {
           // 失败时强制刷新一次余额
