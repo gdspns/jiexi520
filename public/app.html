@@ -942,6 +942,7 @@
       window.__sb = sb;
       let currentUser = null;
       let isAdmin = false;
+      let userCredits = null; // null = 未知/未登录
 
       const bar = document.getElementById("auth-bar");
       const btnStyle = "padding:6px 14px;border-radius:8px;font-size:13px;font-weight:600;border:1px solid #475569;background:rgba(15,23,42,0.7);color:#f8fafc;cursor:pointer;backdrop-filter:blur(8px);";
@@ -961,6 +962,13 @@
         tag.textContent = currentUser.email;
         tag.style.cssText = "color:#cbd5e1;font-size:12px;padding:6px 10px;background:rgba(15,23,42,0.7);border-radius:8px;border:1px solid #334155;";
         bar.appendChild(tag);
+        const credit = document.createElement("span");
+        const low = (userCredits !== null && userCredits <= 0 && !isAdmin);
+        credit.innerHTML = isAdmin
+          ? '<i class="fa-solid fa-infinity"></i> 不限'
+          : `<i class="fa-solid fa-coins"></i> 剩余 ${userCredits ?? "—"} 次`;
+        credit.style.cssText = `font-size:12px;padding:6px 10px;border-radius:8px;border:1px solid ${low ? "#ef4444" : "#334155"};background:rgba(15,23,42,0.7);color:${low ? "#fca5a5" : "#fde68a"};font-weight:600;`;
+        bar.appendChild(credit);
         if (isAdmin) {
           const adm = document.createElement("a");
           adm.textContent = "管理后台";
@@ -983,9 +991,12 @@
           if (!error && userData.user) currentUser = userData.user;
         }
         isAdmin = false;
+        userCredits = null;
         if (currentUser) {
           const { data: roles } = await sb.from("user_roles").select("role").eq("user_id", currentUser.id);
           isAdmin = !!roles?.some(r => r.role === "admin");
+          const { data: prof } = await sb.from("profiles").select("credits").eq("id", currentUser.id).maybeSingle();
+          userCredits = prof?.credits ?? 0;
         }
         renderBar();
       }
@@ -1012,21 +1023,43 @@
       }
       window.__requireLogin = requireLogin;
 
+      function requireCredits(actionLabel) {
+        if (!requireLogin(actionLabel)) return false;
+        if (isAdmin) return true;
+        if (userCredits !== null && userCredits > 0) return true;
+        showToast && showToast(`⚠️ 次数不足，请充值后再使用「${actionLabel}」`, 'error');
+        return false;
+      }
+      async function consumeOneCredit() {
+        if (isAdmin) return;
+        try {
+          const { data, error } = await sb.rpc("consume_credit");
+          if (error) throw error;
+          userCredits = data;
+          renderBar();
+        } catch (e) {
+          // 失败时强制刷新一次余额
+          refreshAuth();
+        }
+      }
+      window.__requireCredits = requireCredits;
+      window.__consumeCredit = consumeOneCredit;
+
       // 拦截：单链接解析表单提交
       document.getElementById("convert-form")?.addEventListener("submit", (e) => {
-        if (!requireLogin("解析音频")) { e.preventDefault(); e.stopImmediatePropagation(); }
+        if (!requireCredits("解析音频")) { e.preventDefault(); e.stopImmediatePropagation(); }
       }, true);
 
       // 拦截：批量解析按钮
       document.getElementById("batch-submit-btn")?.addEventListener("click", (e) => {
-        if (!requireLogin("批量解析")) { e.preventDefault(); e.stopImmediatePropagation(); }
+        if (!requireCredits("批量解析")) { e.preventDefault(); e.stopImmediatePropagation(); }
       }, true);
 
       // 拦截：本地文件选择（点击触发文件选择对话框前拦截）
       const fi = document.getElementById("local-file-input");
       if (fi) {
         fi.addEventListener("click", (e) => {
-          if (!requireLogin("本地转换")) { e.preventDefault(); e.stopImmediatePropagation(); }
+          if (!requireCredits("本地转换")) { e.preventDefault(); e.stopImmediatePropagation(); }
         }, true);
       }
     </script>
