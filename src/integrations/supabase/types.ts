@@ -18,18 +18,21 @@ export type Database = {
         Row: {
           banned: boolean
           created_at: string
+          credits: number
           email: string
           id: string
         }
         Insert: {
           banned?: boolean
           created_at?: string
+          credits?: number
           email: string
           id: string
         }
         Update: {
           banned?: boolean
           created_at?: string
+          credits?: number
           email?: string
           id?: string
         }
@@ -61,6 +64,11 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_adjust_credits: {
+        Args: { _delta: number; _user_id: string }
+        Returns: number
+      }
+      consume_credit: { Args: never; Returns: number }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
