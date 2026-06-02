@@ -678,6 +678,10 @@
 
             for (let i = 0; i < batchPendingUrls.length; i++) {
                 const url = batchPendingUrls[i];
+                if (!isAdmin && userCredits !== null && userCredits <= 0) {
+                    showToast(`次数不足，已停止后续解析（剩余 ${batchPendingUrls.length - i} 条未处理），请充值`, 'error');
+                    break;
+                }
                 const percent = Math.round((i / batchPendingUrls.length) * 100);
                 progBar.style.width = `${percent}%`;
                 progText.textContent = `正在解析 ${i+1} / ${batchPendingUrls.length}...`;
