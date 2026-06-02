@@ -933,11 +933,11 @@
     <!-- ============ 登录鉴权层 ============ -->
     <div id="auth-bar" style="position:fixed;top:12px;right:12px;z-index:9999;display:flex;gap:8px;align-items:center;font-family:Inter,sans-serif;"></div>
     <script type="module">
-      import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+      import { createClient } from "https://esm.sh/@supabase/supabase-js@2.106.2";
       const SUPABASE_URL = "https://cbxenoebinlmdmaqelyv.supabase.co";
       const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNieGVub2ViaW5sbWRtYXFlbHl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0MDcyNzAsImV4cCI6MjA5NTk4MzI3MH0.s8NuyIZSkaVqkAm63RV3nrg60Jyiu9i4mPg13MxfGLU";
       const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
-        auth: { persistSession: true, storage: localStorage, storageKey: "sb-cbxenoebinlmdmaqelyv-auth-token" }
+        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage: localStorage }
       });
       window.__sb = sb;
       let currentUser = null;
@@ -976,8 +976,12 @@
       }
 
       async function refreshAuth() {
-        const { data } = await sb.auth.getUser();
-        currentUser = data.user || null;
+        const { data: sessionData } = await sb.auth.getSession();
+        currentUser = sessionData.session?.user || null;
+        if (currentUser) {
+          const { data: userData, error } = await sb.auth.getUser();
+          if (!error && userData.user) currentUser = userData.user;
+        }
         isAdmin = false;
         if (currentUser) {
           const { data: roles } = await sb.from("user_roles").select("role").eq("user_id", currentUser.id);
@@ -985,7 +989,11 @@
         }
         renderBar();
       }
-      sb.auth.onAuthStateChange(() => refreshAuth());
+      sb.auth.onAuthStateChange((_event, session) => {
+        currentUser = session?.user || null;
+        renderBar();
+        setTimeout(refreshAuth, 0);
+      });
       refreshAuth();
 
       function requireLogin(actionLabel) {
