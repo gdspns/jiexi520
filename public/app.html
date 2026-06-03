@@ -592,7 +592,7 @@
             }
 
             const player = document.getElementById('real-audio-player');
-            player.src = data.music_url; player.load();
+            player.src = proxify(data.music_url); player.load();
             document.getElementById('play-pause-btn').querySelector('i').className = 'fa-solid fa-play ml-1';
             document.getElementById('audio-progress').style.width = '0%';
             
@@ -841,7 +841,7 @@
             if (currentSingleData && currentSingleData.video_url) {
                 document.getElementById('real-audio-player').pause();
                 document.getElementById('modal-video-title').textContent = currentSingleData.title;
-                vPlayer.src = currentSingleData.video_url;
+                vPlayer.src = proxify(currentSingleData.video_url);
                 vModal.classList.remove('hidden'); vModal.classList.add('flex');
                 setTimeout(() => {
                     vModal.classList.remove('opacity-0');
