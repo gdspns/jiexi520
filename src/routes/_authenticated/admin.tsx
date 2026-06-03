@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus } from "@/lib/admin.functions";
+import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig } from "@/lib/admin.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated/admin")({
@@ -27,12 +27,26 @@ function AdminPage() {
   const adj = useServerFn(adjustCredits);
   const getBonus = useServerFn(getSignupBonus);
   const saveBonus = useServerFn(setSignupBonus);
+  const getCfg = useServerFn(getApiConfig);
+  const saveCfg = useServerFn(setApiConfig);
   const [busy, setBusy] = useState<string | null>(null);
   const [bonus, setBonus] = useState<number | "">("");
   const [savingBonus, setSavingBonus] = useState(false);
+  const [apiEndpoint, setApiEndpoint] = useState("");
+  const [apiToken, setApiToken] = useState("");
+  const [showToken, setShowToken] = useState(false);
+  const [savingCfg, setSavingCfg] = useState(false);
+  const [defaults, setDefaults] = useState<{ endpoint: string; token: string } | null>(null);
 
   useEffect(() => {
     getBonus().then((r) => setBonus(r.value)).catch(() => {});
+    getCfg()
+      .then((r) => {
+        setApiEndpoint(r.endpoint);
+        setApiToken(r.token);
+        setDefaults(r.defaults);
+      })
+      .catch(() => {});
   }, []);
 
   const onSaveBonus = async () => {
@@ -47,6 +61,27 @@ function AdminPage() {
     } finally {
       setSavingBonus(false);
     }
+  };
+
+  const onSaveCfg = async () => {
+    const ep = apiEndpoint.trim();
+    const tk = apiToken.trim();
+    if (!/^https?:\/\//i.test(ep)) return alert("接口地址必须以 http(s):// 开头");
+    setSavingCfg(true);
+    try {
+      await saveCfg({ data: { endpoint: ep, token: tk } });
+      alert("API 配置已保存");
+    } catch (e: any) {
+      alert(e?.message || "保存失败");
+    } finally {
+      setSavingCfg(false);
+    }
+  };
+
+  const onResetCfg = () => {
+    if (!defaults) return;
+    setApiEndpoint(defaults.endpoint);
+    setApiToken(defaults.token);
   };
 
   const { data, isLoading, error, refetch } = useQuery({
@@ -134,6 +169,58 @@ function AdminPage() {
             >
               {savingBonus ? "保存中..." : "保存"}
             </button>
+          </div>
+        </section>
+
+        <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+          <h2 className="text-base font-bold mb-1">解析 API 配置</h2>
+          <p className="text-xs text-slate-400 mb-3">配置视频解析接口地址与密钥，保存后立即对所有用户生效。</p>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">API 接口地址</label>
+              <input
+                type="text"
+                value={apiEndpoint}
+                onChange={(e) => setApiEndpoint(e.target.value)}
+                placeholder="https://v3.alapi.cn/api/video/url"
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">API 密钥 (Token)</label>
+              <div className="flex gap-2">
+                <input
+                  type={showToken ? "text" : "password"}
+                  value={apiToken}
+                  onChange={(e) => setApiToken(e.target.value)}
+                  placeholder="（留空将使用模拟数据）"
+                  className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowToken((s) => !s)}
+                  className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs"
+                >
+                  {showToken ? "隐藏" : "显示"}
+                </button>
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={onSaveCfg}
+                disabled={savingCfg}
+                className="px-4 py-2 rounded-lg bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white text-sm font-semibold disabled:opacity-50"
+              >
+                {savingCfg ? "保存中..." : "保存配置"}
+              </button>
+              <button
+                onClick={onResetCfg}
+                disabled={!defaults}
+                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm disabled:opacity-50"
+              >
+                恢复默认
+              </button>
+            </div>
           </div>
         </section>
 
