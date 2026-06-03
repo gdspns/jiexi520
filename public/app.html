@@ -345,8 +345,25 @@
 
     <script>
         // ================= 配置区 =================
-        const API_ENDPOINT = "https://v3.alapi.cn/api/video/url"; 
-        const API_TOKEN = "jerv9kslg8kiuxute89fizcl06m5e1"; 
+        // API 配置由管理员在后台配置，运行时通过 /api/config 拉取
+        let __apiConfig = null;
+        async function loadApiConfig() {
+            if (__apiConfig) return __apiConfig;
+            try {
+                const sb = window.__sb;
+                const { data } = await sb.auth.getSession();
+                const token = data.session?.access_token;
+                if (!token) throw new Error("未登录");
+                const res = await fetch('/api/config', {
+                    headers: { Authorization: 'Bearer ' + token }
+                });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                __apiConfig = await res.json();
+            } catch (e) {
+                __apiConfig = { endpoint: "", token: "" };
+            }
+            return __apiConfig;
+        }
 
         // ================= 全局状态 =================
         let currentSingleData = null;
@@ -384,7 +401,8 @@
         }
 
         async function fetchVideoDataAPI(url) {
-            if (!API_TOKEN) {
+            const cfg = await loadApiConfig();
+            if (!cfg.token || !cfg.endpoint) {
                 await new Promise(r => setTimeout(r, 800));
                 return {
                     title: `模拟提取 - ${determinePlatform(url)}`,
@@ -397,10 +415,10 @@
             }
 
             const formData = new FormData();
-            formData.append('token', API_TOKEN);
+            formData.append('token', cfg.token);
             formData.append('url', url);
 
-            const response = await fetch(API_ENDPOINT, { method: 'POST', body: formData });
+            const response = await fetch(cfg.endpoint, { method: 'POST', body: formData });
             if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
             
             const data = await response.json();
