@@ -422,30 +422,18 @@
 
         // --- 新增强化：更适合二进制流传输的高级 CORS 代理 ---
         async function smartFetch(url) {
-            try {
-                // 第一步：尝试直接拉取（大多数平台能直接成功）
-                const res = await fetch(url);
-                if (res.ok) return res;
-                throw new Error('直接跨域请求被拒绝');
-            } catch (err) {
-                console.warn('正在启动高级流媒体代理穿透...', err);
-                // 第二步：使用专门针对大文件和二进制优化的代理
-                // corsproxy.io 对流媒体的支持远好于普通的 API 代理
-                const proxyList = [
-                    `https://corsproxy.io/?${encodeURIComponent(url)}`,
-                    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
-                ];
-                
-                for (let proxyUrl of proxyList) {
-                    try {
-                        const proxyRes = await fetch(proxyUrl);
-                        if (proxyRes.ok) return proxyRes;
-                    } catch(e) {
-                        console.warn(`代理节点 ${proxyUrl} 连接失败，尝试下一个...`);
-                    }
-                }
-                throw new Error('所有穿透手段均被对方服务器防火墙拦截');
-            }
+            // 走自家后端媒体代理，由 Worker 携带正确的 Referer/UA 抓取，绕开防盗链和 CORS
+            const proxied = proxify(url);
+            const res = await fetch(proxied);
+            if (!res.ok) throw new Error('媒体代理返回 ' + res.status);
+            return res;
+        }
+
+        // 构造同源媒体代理 URL，让 <audio>/<video> 与 fetch 都能稳定加载远端 CDN
+        function proxify(u) {
+            if (!u) return u;
+            if (u.startsWith('/api/public/media-proxy')) return u;
+            return '/api/public/media-proxy?url=' + encodeURIComponent(u);
         }
 
         // ================= 核心：纯正 MP3 转码引擎 =================
