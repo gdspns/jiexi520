@@ -1,6 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({
+  beforeLoad: () => {
+    throw redirect({ href: "/index.html", statusCode: 302 });
+  },
   head: () => ({
     meta: [
       { title: "音影无损 - 视频转MP3提取器 (Pro)" },
