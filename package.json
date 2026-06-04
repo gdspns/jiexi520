@@ -14,7 +14,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "start": "node .output/server/index.mjs"
+    "start": "node dist/server/index.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
