@@ -13,7 +13,7 @@ export const Route = createFileRoute("/_authenticated/admin")({
       <div className="max-w-md text-center">
         <h1 className="text-xl font-bold mb-2">无法加载管理后台</h1>
         <p className="text-sm text-slate-400">{error.message}</p>
-        <a href="/app.html" className="inline-block mt-4 text-pink-400 hover:underline">返回首页</a>
+        <a href="/index.html" className="inline-block mt-4 text-pink-400 hover:underline">返回首页</a>
       </div>
     </div>
   ),
@@ -134,7 +134,7 @@ function AdminPage() {
 
   const logout = async () => {
     await supabase.auth.signOut();
-    window.location.replace("/app.html");
+    window.location.replace("/index.html");
   };
 
   return (
@@ -143,7 +143,7 @@ function AdminPage() {
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <h1 className="text-lg font-bold">管理员后台 · 用户列表</h1>
           <div className="flex gap-2">
-            <a href="/app.html" className="text-sm px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700">返回应用</a>
+            <a href="/index.html" className="text-sm px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700">返回应用</a>
             <button onClick={logout} className="text-sm px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700">退出登录</button>
           </div>
         </div>
