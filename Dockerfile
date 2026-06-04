@@ -16,6 +16,8 @@ WORKDIR /app
 ENV DEPLOY_TARGET=zeabur
 ENV HUSKY=0
 
+RUN npm install -g bun@1.3.3
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN bun run build
