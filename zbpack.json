@@ -1,4 +1,4 @@
 {
   "build_command": "DEPLOY_TARGET=zeabur bun run build",
-  "start_command": "bun run start"
+  "start_command": "node dist/server/index.mjs"
 }
