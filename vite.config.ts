@@ -6,7 +6,14 @@
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
+const isZeaburBuild = process.env.DEPLOY_TARGET === "zeabur";
+
 export default defineConfig({
+  nitro: isZeaburBuild
+    ? {
+        preset: "node-server",
+      }
+    : undefined,
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
