@@ -7,6 +7,8 @@ ENV HUSKY=0
 COPY package.json bun.lock ./
 
 RUN npm install -g bun@1.3.3 \
+  && which bun \
+  && bun --version \
   && bun install --frozen-lockfile
 
 FROM node:20-bookworm-slim AS builder
@@ -16,9 +18,8 @@ WORKDIR /app
 ENV DEPLOY_TARGET=zeabur
 ENV HUSKY=0
 
-# Copy bun from deps stage and set PATH
-COPY --from=deps /root/.bun /root/.bun
-ENV PATH="/root/.bun/bin:$PATH"
+# Install bun in builder stage
+RUN npm install -g bun@1.3.3
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
