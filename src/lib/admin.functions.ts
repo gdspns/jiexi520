@@ -94,7 +94,8 @@ export const adjustCredits = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     await assertAdmin(supabase, userId);
-    const { data: result, error } = await supabase.rpc("admin_adjust_credits", {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: result, error } = await supabaseAdmin.rpc("admin_adjust_credits", {
       _user_id: data.userId,
       _delta: data.delta,
     });
