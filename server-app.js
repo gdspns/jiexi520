@@ -10,12 +10,13 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// 静态文件托管：直接让服务器把当前最外层目录当作静态网站展示
-app.use(express.static(__dirname));
+// 静态文件托管：以 public 目录作为站点根，兼容 Vite/TanStack Start 的目录结构
+const PUBLIC_DIR = path.join(__dirname, 'public');
+app.use(express.static(PUBLIC_DIR));
 
-// 当用户访问网站根目录时，直接发送最外层的标准主页文件
+// 当用户访问网站根目录时，直接发送 public/index.html 作为首页
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+    res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 
 // ==========================================
