@@ -37,7 +37,6 @@ export const listUsers = createServerFn({ method: "GET" })
     });
 
     return profiles.map((p) => {
-      const au = authMap.get(p.id);
       return {
         id: p.id,
         email: p.email,
