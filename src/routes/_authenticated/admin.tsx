@@ -34,9 +34,11 @@ function AdminPage() {
   const [savingBonus, setSavingBonus] = useState(false);
   const [apiEndpoint, setApiEndpoint] = useState("");
   const [apiToken, setApiToken] = useState("");
+  const [apiProxy, setApiProxy] = useState("");
   const [showToken, setShowToken] = useState(false);
+  const [showProxy, setShowProxy] = useState(false);
   const [savingCfg, setSavingCfg] = useState(false);
-  const [defaults, setDefaults] = useState<{ endpoint: string; token: string } | null>(null);
+  const [defaults, setDefaults] = useState<{ endpoint: string; token: string; proxy: string } | null>(null);
 
   useEffect(() => {
     getBonus().then((r) => setBonus(r.value)).catch(() => {});
@@ -44,6 +46,7 @@ function AdminPage() {
       .then((r) => {
         setApiEndpoint(r.endpoint);
         setApiToken(r.token);
+        setApiProxy(r.proxy || "");
         setDefaults(r.defaults);
       })
       .catch(() => {});
@@ -66,10 +69,12 @@ function AdminPage() {
   const onSaveCfg = async () => {
     const ep = apiEndpoint.trim();
     const tk = apiToken.trim();
+    const px = apiProxy.trim();
     if (!/^https?:\/\//i.test(ep)) return alert("接口地址必须以 http(s):// 开头");
+    if (px && !/^https?:\/\//i.test(px)) return alert("代理地址必须以 http(s):// 开头（例如 http://user:pass@ip:port）");
     setSavingCfg(true);
     try {
-      await saveCfg({ data: { endpoint: ep, token: tk } });
+      await saveCfg({ data: { endpoint: ep, token: tk, proxy: px } });
       alert("API 配置已保存");
     } catch (e: any) {
       alert(e?.message || "保存失败");
@@ -82,6 +87,7 @@ function AdminPage() {
     if (!defaults) return;
     setApiEndpoint(defaults.endpoint);
     setApiToken(defaults.token);
+    setApiProxy(defaults.proxy || "");
   };
 
   const { data, isLoading, error, refetch } = useQuery({
@@ -204,6 +210,30 @@ function AdminPage() {
                   {showToken ? "隐藏" : "显示"}
                 </button>
               </div>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">
+                海外代理 (Proxy) — 用于 TikTok / YouTube 等海外平台
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type={showProxy ? "text" : "password"}
+                  value={apiProxy}
+                  onChange={(e) => setApiProxy(e.target.value)}
+                  placeholder="http://user:pass@ip:port （留空则不使用代理）"
+                  className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowProxy((s) => !s)}
+                  className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs"
+                >
+                  {showProxy ? "隐藏" : "显示"}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">
+                支持 ISP 静态住宅代理。海外平台解析将通过此代理由 yt-dlp 抓取，需 Node.js 部署环境（Zeabur）。
+              </p>
             </div>
             <div className="flex gap-2 pt-1">
               <button
