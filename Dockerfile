@@ -30,6 +30,12 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
 
+# yt-dlp (used by youtube-dl-exec for overseas video parsing) is a Python zipapp
+# and requires python3 at runtime. ca-certificates for HTTPS to upstream sites.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./package.json
