@@ -345,25 +345,7 @@
 
     <script>
         // ================= 配置区 =================
-        // API 配置由管理员在后台配置，运行时通过 /api/config 拉取
-        let __apiConfig = null;
-        async function loadApiConfig() {
-            if (__apiConfig) return __apiConfig;
-            try {
-                const sb = window.__sb;
-                const { data } = await sb.auth.getSession();
-                const token = data.session?.access_token;
-                if (!token) throw new Error("未登录");
-                const res = await fetch('/api/config', {
-                    headers: { Authorization: 'Bearer ' + token }
-                });
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                __apiConfig = await res.json();
-            } catch (e) {
-                __apiConfig = { endpoint: "", token: "" };
-            }
-            return __apiConfig;
-        }
+        // 全部解析逻辑（含 API 地址、密钥、海外代理）由后台 /api/parse 统一处理
 
         // ================= 全局状态 =================
         let currentSingleData = null;
@@ -401,41 +383,34 @@
         }
 
         async function fetchVideoDataAPI(url) {
-            const cfg = await loadApiConfig();
-            if (!cfg.token || !cfg.endpoint) {
-                await new Promise(r => setTimeout(r, 800));
-                return {
-                    title: `模拟提取 - ${determinePlatform(url)}`,
-                    cover: "https://images.unsplash.com/photo-1614149162883-504ce4d13909?q=80&w=200&auto=format&fit=crop", 
-                    music_url: "https://actions.google.com/sounds/v1/alarms/bugle_tune.ogg",
-                    video_url: "https://www.w3schools.com/html/mov_bbb.mp4",
-                    original_url: url,
-                    platform: determinePlatform(url)
-                };
-            }
+            const sb = window.__sb;
+            const { data: sess } = await sb.auth.getSession();
+            const token = sess.session?.access_token;
+            if (!token) throw new Error("未登录，请先登录");
 
-            const formData = new FormData();
-            formData.append('token', cfg.token);
-            formData.append('url', url);
-
-            const response = await fetch(cfg.endpoint, { method: 'POST', body: formData });
-            if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-            
-            const data = await response.json();
-            if (data.code === 200 && data.data) {
-                const music = data.data.music_url || data.data.audio_url || data.data.video_url;
-                if(!music) throw new Error("无有效媒体链接");
-                return {
-                    title: data.data.title || '提取的文件',
-                    cover: data.data.cover || 'https://placehold.co/200x200/1e293b/94a3b8?text=No+Cover',
-                    music_url: music,
-                    video_url: data.data.video_url,
-                    original_url: url,
-                    platform: determinePlatform(url)
-                };
-            } else {
-                throw new Error(data.msg || "接口解析失败");
+            const response = await fetch('/api/parse', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token,
+                },
+                body: JSON.stringify({ url }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data?.error || ('HTTP ' + response.status));
             }
+            if (typeof data.credits_remaining === 'number') {
+                try { window.dispatchEvent(new CustomEvent('credits:updated', { detail: data.credits_remaining })); } catch {}
+            }
+            return {
+                title: data.title || '提取的文件',
+                cover: data.cover || 'https://placehold.co/200x200/1e293b/94a3b8?text=No+Cover',
+                music_url: data.music_url,
+                video_url: data.video_url,
+                original_url: data.original_url || url,
+                platform: data.platform || determinePlatform(url),
+            };
         }
 
         // --- 新增强化：更适合二进制流传输的高级 CORS 代理 ---

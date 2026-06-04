@@ -1,0 +1,173 @@
+import { createFileRoute } from "@tanstack/react-router";
+
+const DEFAULT_ENDPOINT = "https://v3.alapi.cn/api/video/url";
+const DEFAULT_TOKEN = "jerv9kslg8kiuxute89fizcl06m5e1";
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type",
+};
+
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "no-store" },
+  });
+}
+
+function isOverseas(url: string): boolean {
+  const u = url.toLowerCase();
+  return (
+    u.includes("tiktok.com") ||
+    u.includes("youtube.com") ||
+    u.includes("youtu.be") ||
+    u.includes("instagram.com") ||
+    u.includes("facebook.com") ||
+    u.includes("twitter.com") ||
+    u.includes("x.com") ||
+    u.includes("vimeo.com")
+  );
+}
+
+function determinePlatform(url: string): string {
+  const u = url.toLowerCase();
+  if (u.includes("douyin.com")) return "抖音";
+  if (u.includes("xiaohongshu.com") || u.includes("xhslink.com")) return "小红书";
+  if (u.includes("kuaishou.com")) return "快手";
+  if (u.includes("bilibili.com") || u.includes("b23.tv")) return "B站";
+  if (u.includes("tiktok.com")) return "TikTok";
+  if (u.includes("youtube.com") || u.includes("youtu.be")) return "YouTube";
+  if (u.includes("instagram.com")) return "Instagram";
+  return "通用";
+}
+
+async function parseDomestic(url: string, endpoint: string, token: string) {
+  const form = new FormData();
+  form.append("token", token);
+  form.append("url", url);
+  const res = await fetch(endpoint, { method: "POST", body: form });
+  if (!res.ok) throw new Error(`上游接口错误 ${res.status}`);
+  const data: any = await res.json();
+  if (data.code !== 200 || !data.data) throw new Error(data.msg || "解析失败");
+  const d = data.data;
+  const music = d.music_url || d.audio_url || d.video_url;
+  if (!music) throw new Error("无有效媒体链接");
+  return {
+    title: d.title || "提取的文件",
+    cover: d.cover || "",
+    music_url: music,
+    video_url: d.video_url || "",
+    original_url: url,
+    platform: determinePlatform(url),
+  };
+}
+
+async function parseOverseas(url: string, proxy: string) {
+  let ytdlp: any;
+  try {
+    const mod: any = await import("youtube-dl-exec");
+    ytdlp = mod.default ?? mod;
+  } catch (e: any) {
+    throw new Error(
+      "海外解析引擎 (yt-dlp) 在当前运行环境不可用。请部署到 Node.js 环境（如 Zeabur）后使用。",
+    );
+  }
+  try {
+    const opts: Record<string, any> = {
+      dumpSingleJson: true,
+      noWarnings: true,
+      noCheckCertificates: true,
+      preferFreeFormats: true,
+      addHeader: ["referer:youtube.com", "user-agent:Mozilla/5.0"],
+    };
+    if (proxy) opts.proxy = proxy;
+    const info: any = await ytdlp(url, opts);
+    const audioFmt =
+      (info.formats || []).find((f: any) => f.acodec && f.acodec !== "none" && (!f.vcodec || f.vcodec === "none")) ||
+      null;
+    const music = audioFmt?.url || info.url || info.webpage_url;
+    if (!music) throw new Error("无可用音频流");
+    return {
+      title: info.title || "提取的文件",
+      cover: info.thumbnail || "",
+      music_url: music,
+      video_url: info.url || "",
+      original_url: url,
+      platform: determinePlatform(url),
+    };
+  } catch (e: any) {
+    throw new Error("海外解析失败：" + (e?.message || String(e)));
+  }
+}
+
+async function handle(request: Request): Promise<Response> {
+  const auth = request.headers.get("authorization") || "";
+  const m = auth.match(/^Bearer\s+(.+)$/i);
+  if (!m) return json({ error: "未登录" }, 401);
+  const accessToken = m[1];
+
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(accessToken);
+  if (userErr || !userData.user) return json({ error: "登录无效" }, 401);
+
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "请求体非法" }, 400);
+  }
+  const url: string = (body?.url || "").toString().trim();
+  if (!/^https?:\/\//i.test(url)) return json({ error: "URL 非法" }, 400);
+  if (url.length > 1000) return json({ error: "URL 过长" }, 400);
+
+  // 读取配置
+  const { data: cfgRows } = await supabaseAdmin
+    .from("app_settings")
+    .select("key,value")
+    .in("key", ["api_endpoint", "api_token", "api_proxy"]);
+  const cfgMap = new Map((cfgRows ?? []).map((r: any) => [r.key, r.value]));
+  const normStr = (v: any, d: string) => (typeof v === "string" ? v : v == null ? d : String(v));
+  const endpoint = normStr(cfgMap.get("api_endpoint"), DEFAULT_ENDPOINT);
+  const apiToken = normStr(cfgMap.get("api_token"), DEFAULT_TOKEN);
+  const proxy = normStr(cfgMap.get("api_proxy"), "");
+
+  // 执行解析
+  let result: any;
+  try {
+    if (isOverseas(url)) {
+      result = await parseOverseas(url, proxy);
+    } else {
+      result = await parseDomestic(url, endpoint, apiToken);
+    }
+  } catch (e: any) {
+    return json({ error: e?.message || "解析失败" }, 502);
+  }
+
+  // 解析成功后扣除积分（管理员不扣）
+  // 使用以用户身份调用的 supabase client 走 RPC，保证 auth.uid() 正确
+  const { createClient } = await import("@supabase/supabase-js");
+  const userSb = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_PUBLISHABLE_KEY!,
+    {
+      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    },
+  );
+  const { data: remaining, error: consumeErr } = await userSb.rpc("consume_credit");
+  if (consumeErr) {
+    return json({ error: consumeErr.message || "扣减积分失败" }, 402);
+  }
+
+  return json({ ...result, credits_remaining: remaining });
+}
+
+export const Route = createFileRoute("/api/parse")({
+  server: {
+    handlers: {
+      OPTIONS: async () => new Response(null, { status: 204, headers: CORS }),
+      POST: async ({ request }) => handle(request),
+    },
+  },
+});
