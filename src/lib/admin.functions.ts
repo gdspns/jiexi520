@@ -131,6 +131,7 @@ export const setSignupBonus = createServerFn({ method: "POST" })
 
 const DEFAULT_API_ENDPOINT = "https://v3.alapi.cn/api/video/url";
 const DEFAULT_API_TOKEN = "jerv9kslg8kiuxute89fizcl06m5e1";
+const DEFAULT_API_PROXY = "";
 
 export const getApiConfig = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -140,7 +141,7 @@ export const getApiConfig = createServerFn({ method: "GET" })
     const { data, error } = await supabase
       .from("app_settings")
       .select("key,value")
-      .in("key", ["api_endpoint", "api_token"]);
+      .in("key", ["api_endpoint", "api_token", "api_proxy"]);
     if (error) throw new Error(error.message);
     const map = new Map((data ?? []).map((r: any) => [r.key, r.value]));
     const norm = (v: any, d: string) =>
@@ -148,7 +149,12 @@ export const getApiConfig = createServerFn({ method: "GET" })
     return {
       endpoint: norm(map.get("api_endpoint"), DEFAULT_API_ENDPOINT),
       token: norm(map.get("api_token"), DEFAULT_API_TOKEN),
-      defaults: { endpoint: DEFAULT_API_ENDPOINT, token: DEFAULT_API_TOKEN },
+      proxy: norm(map.get("api_proxy"), DEFAULT_API_PROXY),
+      defaults: {
+        endpoint: DEFAULT_API_ENDPOINT,
+        token: DEFAULT_API_TOKEN,
+        proxy: DEFAULT_API_PROXY,
+      },
     };
   });
 
@@ -159,6 +165,7 @@ export const setApiConfig = createServerFn({ method: "POST" })
       .object({
         endpoint: z.string().trim().url().max(500),
         token: z.string().trim().max(500),
+        proxy: z.string().trim().max(500).default(""),
       })
       .parse(input),
   )
@@ -169,6 +176,7 @@ export const setApiConfig = createServerFn({ method: "POST" })
     const { error } = await supabase.from("app_settings").upsert([
       { key: "api_endpoint", value: data.endpoint as any, updated_at: now },
       { key: "api_token", value: data.token as any, updated_at: now },
+      { key: "api_proxy", value: data.proxy as any, updated_at: now },
     ]);
     if (error) throw new Error(error.message);
     return { ok: true };
