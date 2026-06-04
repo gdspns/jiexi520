@@ -94,21 +94,12 @@ export const adjustCredits = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     await assertAdmin(supabase, userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: existing, error: readErr } = await supabaseAdmin
-      .from("profiles")
-      .select("credits")
-      .eq("id", data.userId)
-      .maybeSingle();
-    if (readErr) throw new Error(readErr.message);
-    if (!existing) throw new Error("用户不存在");
-    const next = Math.max(0, (existing.credits ?? 0) + data.delta);
-    const { error: updErr } = await supabaseAdmin
-      .from("profiles")
-      .update({ credits: next })
-      .eq("id", data.userId);
-    if (updErr) throw new Error(updErr.message);
-    return { credits: next };
+    const { data: result, error } = await supabase.rpc("admin_adjust_credits", {
+      _user_id: data.userId,
+      _delta: data.delta,
+    });
+    if (error) throw new Error(error.message);
+    return { credits: result as number };
   });
 
 export const getSignupBonus = createServerFn({ method: "GET" })
