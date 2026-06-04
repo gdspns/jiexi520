@@ -17,18 +17,18 @@ export const listUsers = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { supabase, userId } = context;
     await assertAdmin(supabase, userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const { data: profiles, error } = await supabaseAdmin
+    const { data: profiles, error } = await supabase
       .from("profiles")
       .select("id, email, banned, credits, created_at")
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
 
-    const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
-    const authMap = new Map(authUsers.users.map((u) => [u.id, u]));
+    const { data: roles, error: rolesError } = await supabase
+      .from("user_roles")
+      .select("user_id, role");
+    if (rolesError) throw new Error(rolesError.message);
 
-    const { data: roles } = await supabaseAdmin.from("user_roles").select("user_id, role");
     const roleMap = new Map<string, string[]>();
     roles?.forEach((r) => {
       const arr = roleMap.get(r.user_id) || [];
@@ -37,14 +37,13 @@ export const listUsers = createServerFn({ method: "GET" })
     });
 
     return profiles.map((p) => {
-      const au = authMap.get(p.id);
       return {
         id: p.id,
         email: p.email,
         banned: p.banned,
         credits: p.credits ?? 0,
         created_at: p.created_at,
-        last_sign_in_at: au?.last_sign_in_at ?? null,
+        last_sign_in_at: null,
         roles: roleMap.get(p.id) || [],
       };
     });
