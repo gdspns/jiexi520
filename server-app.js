@@ -10,14 +10,13 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ==========================================
-// 【关键修改】：适配 Lovable 结构，告诉服务器静态文件在 public 文件夹里
-// ==========================================
-app.use(express.static(path.join(__dirname, 'public')));
+// 静态文件托管：以 public 目录作为站点根，兼容 Vite/TanStack Start 的目录结构
+const PUBLIC_DIR = path.join(__dirname, 'public');
+app.use(express.static(PUBLIC_DIR));
 
-// 当用户访问网站根目录时，自动去 public 文件夹下加载 index.html
+// 当用户访问网站根目录时，直接发送 public/index.html 作为首页
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 
 // ==========================================
