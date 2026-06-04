@@ -16,8 +16,9 @@ WORKDIR /app
 ENV DEPLOY_TARGET=zeabur
 ENV HUSKY=0
 
-# Install bun in builder stage
-RUN npm install -g bun@1.3.3
+# Copy bun from deps stage and set PATH
+COPY --from=deps /root/.bun /root/.bun
+ENV PATH="/root/.bun/bin:$PATH"
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
