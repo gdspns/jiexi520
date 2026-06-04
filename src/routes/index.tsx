@@ -12,7 +12,7 @@ export const Route = createFileRoute("/")({
 
 function Index() {
   if (typeof window !== "undefined") {
-    window.location.replace("/app.html");
+    window.location.replace("/index.html");
   }
   return (
     <div style={{ minHeight: "100vh", background: "#0f172a" }} />

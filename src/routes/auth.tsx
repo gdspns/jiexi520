@@ -21,7 +21,7 @@ function AuthPage() {
     supabase.auth.getUser().then(({ data }) => {
       if (data.user) {
         const sp = new URLSearchParams(window.location.search);
-        window.location.replace(sp.get("redirect") || "/app.html");
+        window.location.replace(sp.get("redirect") || "/index.html");
       }
     });
   }, []);
@@ -45,7 +45,7 @@ function AuthPage() {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         const sp = new URLSearchParams(window.location.search);
-        window.location.replace(sp.get("redirect") || "/app.html");
+        window.location.replace(sp.get("redirect") || "/index.html");
       }
     } catch (e: any) {
       setErr(e?.message || "操作失败");
@@ -103,7 +103,7 @@ function AuthPage() {
           )}
         </div>
         <div className="mt-4 text-center">
-          <a href="/app.html" className="text-xs text-slate-500 hover:text-slate-300">← 返回首页</a>
+          <a href="/index.html" className="text-xs text-slate-500 hover:text-slate-300">← 返回首页</a>
         </div>
       </div>
     </div>
