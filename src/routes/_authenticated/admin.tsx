@@ -288,17 +288,32 @@ function AdminPage() {
                           onClick={() => onAdjust(u.id, -1)}
                           className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-xs disabled:opacity-50"
                         >−</button>
-                        <span className={`px-2 font-mono text-sm ${u.credits === 0 ? "text-red-400" : "text-slate-200"}`}>{u.credits}</span>
+                        <input
+                          type="number"
+                          min={0}
+                          defaultValue={u.credits}
+                          key={`${u.id}-${u.credits}`}
+                          disabled={busy === u.id}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          }}
+                          onBlur={(e) => {
+                            const v = parseInt(e.target.value, 10);
+                            if (!Number.isFinite(v) || v < 0) {
+                              e.target.value = String(u.credits);
+                              return;
+                            }
+                            const delta = v - u.credits;
+                            if (delta === 0) return;
+                            onAdjust(u.id, delta);
+                          }}
+                          className={`w-16 px-2 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-sm text-center focus:outline-none focus:border-pink-500 ${u.credits === 0 ? "text-red-400" : "text-slate-200"}`}
+                        />
                         <button
                           disabled={busy === u.id}
                           onClick={() => onAdjust(u.id, 1)}
                           className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-xs disabled:opacity-50"
                         >+</button>
-                        <button
-                          disabled={busy === u.id}
-                          onClick={() => onAdjust(u.id, 0)}
-                          className="ml-1 px-2 h-6 rounded bg-slate-800 hover:bg-slate-700 text-xs disabled:opacity-50"
-                        >自定义</button>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-slate-400">{new Date(u.created_at).toLocaleString("zh-CN")}</td>
