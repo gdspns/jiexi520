@@ -15,6 +15,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiParseRouteImport } from './routes/api/parse'
 import { Route as ApiConfigRouteImport } from './routes/api/config'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
+import { Route as ApiRechargeStatusRouteImport } from './routes/api/recharge/status'
 import { Route as ApiRechargeProductsRouteImport } from './routes/api/recharge/products'
 import { Route as ApiRechargeCreateRouteImport } from './routes/api/recharge/create'
 import { Route as ApiPublicMediaStreamRouteImport } from './routes/api/public/media-stream'
@@ -49,6 +50,11 @@ const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const ApiRechargeStatusRoute = ApiRechargeStatusRouteImport.update({
+  id: '/api/recharge/status',
+  path: '/api/recharge/status',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiRechargeProductsRoute = ApiRechargeProductsRouteImport.update({
   id: '/api/recharge/products',
   path: '/api/recharge/products',
@@ -80,6 +86,7 @@ export interface FileRoutesByFullPath {
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
   '/api/recharge/create': typeof ApiRechargeCreateRoute
   '/api/recharge/products': typeof ApiRechargeProductsRoute
+  '/api/recharge/status': typeof ApiRechargeStatusRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -91,6 +98,7 @@ export interface FileRoutesByTo {
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
   '/api/recharge/create': typeof ApiRechargeCreateRoute
   '/api/recharge/products': typeof ApiRechargeProductsRoute
+  '/api/recharge/status': typeof ApiRechargeStatusRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -104,6 +112,7 @@ export interface FileRoutesById {
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
   '/api/recharge/create': typeof ApiRechargeCreateRoute
   '/api/recharge/products': typeof ApiRechargeProductsRoute
+  '/api/recharge/status': typeof ApiRechargeStatusRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -117,6 +126,7 @@ export interface FileRouteTypes {
     | '/api/public/media-stream'
     | '/api/recharge/create'
     | '/api/recharge/products'
+    | '/api/recharge/status'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -128,6 +138,7 @@ export interface FileRouteTypes {
     | '/api/public/media-stream'
     | '/api/recharge/create'
     | '/api/recharge/products'
+    | '/api/recharge/status'
   id:
     | '__root__'
     | '/'
@@ -140,6 +151,7 @@ export interface FileRouteTypes {
     | '/api/public/media-stream'
     | '/api/recharge/create'
     | '/api/recharge/products'
+    | '/api/recharge/status'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -152,6 +164,7 @@ export interface RootRouteChildren {
   ApiPublicMediaStreamRoute: typeof ApiPublicMediaStreamRoute
   ApiRechargeCreateRoute: typeof ApiRechargeCreateRoute
   ApiRechargeProductsRoute: typeof ApiRechargeProductsRoute
+  ApiRechargeStatusRoute: typeof ApiRechargeStatusRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -197,6 +210,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin'
       preLoaderRoute: typeof AuthenticatedAdminRouteImport
       parentRoute: typeof AuthenticatedRoute
+    }
+    '/api/recharge/status': {
+      id: '/api/recharge/status'
+      path: '/api/recharge/status'
+      fullPath: '/api/recharge/status'
+      preLoaderRoute: typeof ApiRechargeStatusRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/recharge/products': {
       id: '/api/recharge/products'
@@ -251,6 +271,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicMediaStreamRoute: ApiPublicMediaStreamRoute,
   ApiRechargeCreateRoute: ApiRechargeCreateRoute,
   ApiRechargeProductsRoute: ApiRechargeProductsRoute,
+  ApiRechargeStatusRoute: ApiRechargeStatusRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
