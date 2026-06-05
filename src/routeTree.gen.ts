@@ -18,6 +18,7 @@ import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/
 import { Route as ApiRechargeStatusRouteImport } from './routes/api/recharge/status'
 import { Route as ApiRechargeProductsRouteImport } from './routes/api/recharge/products'
 import { Route as ApiRechargeCreateRouteImport } from './routes/api/recharge/create'
+import { Route as ApiPublicXunhupayNotifyRouteImport } from './routes/api/public/xunhupay-notify'
 import { Route as ApiPublicMediaStreamRouteImport } from './routes/api/public/media-stream'
 import { Route as ApiPublicMediaProxyRouteImport } from './routes/api/public/media-proxy'
 
@@ -65,6 +66,11 @@ const ApiRechargeCreateRoute = ApiRechargeCreateRouteImport.update({
   path: '/api/recharge/create',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicXunhupayNotifyRoute = ApiPublicXunhupayNotifyRouteImport.update({
+  id: '/api/public/xunhupay-notify',
+  path: '/api/public/xunhupay-notify',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicMediaStreamRoute = ApiPublicMediaStreamRouteImport.update({
   id: '/api/public/media-stream',
   path: '/api/public/media-stream',
@@ -84,6 +90,7 @@ export interface FileRoutesByFullPath {
   '/api/parse': typeof ApiParseRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
+  '/api/public/xunhupay-notify': typeof ApiPublicXunhupayNotifyRoute
   '/api/recharge/create': typeof ApiRechargeCreateRoute
   '/api/recharge/products': typeof ApiRechargeProductsRoute
   '/api/recharge/status': typeof ApiRechargeStatusRoute
@@ -96,6 +103,7 @@ export interface FileRoutesByTo {
   '/api/parse': typeof ApiParseRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
+  '/api/public/xunhupay-notify': typeof ApiPublicXunhupayNotifyRoute
   '/api/recharge/create': typeof ApiRechargeCreateRoute
   '/api/recharge/products': typeof ApiRechargeProductsRoute
   '/api/recharge/status': typeof ApiRechargeStatusRoute
@@ -110,6 +118,7 @@ export interface FileRoutesById {
   '/api/parse': typeof ApiParseRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
+  '/api/public/xunhupay-notify': typeof ApiPublicXunhupayNotifyRoute
   '/api/recharge/create': typeof ApiRechargeCreateRoute
   '/api/recharge/products': typeof ApiRechargeProductsRoute
   '/api/recharge/status': typeof ApiRechargeStatusRoute
@@ -124,6 +133,7 @@ export interface FileRouteTypes {
     | '/api/parse'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
+    | '/api/public/xunhupay-notify'
     | '/api/recharge/create'
     | '/api/recharge/products'
     | '/api/recharge/status'
@@ -136,6 +146,7 @@ export interface FileRouteTypes {
     | '/api/parse'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
+    | '/api/public/xunhupay-notify'
     | '/api/recharge/create'
     | '/api/recharge/products'
     | '/api/recharge/status'
@@ -149,6 +160,7 @@ export interface FileRouteTypes {
     | '/api/parse'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
+    | '/api/public/xunhupay-notify'
     | '/api/recharge/create'
     | '/api/recharge/products'
     | '/api/recharge/status'
@@ -162,6 +174,7 @@ export interface RootRouteChildren {
   ApiParseRoute: typeof ApiParseRoute
   ApiPublicMediaProxyRoute: typeof ApiPublicMediaProxyRoute
   ApiPublicMediaStreamRoute: typeof ApiPublicMediaStreamRoute
+  ApiPublicXunhupayNotifyRoute: typeof ApiPublicXunhupayNotifyRoute
   ApiRechargeCreateRoute: typeof ApiRechargeCreateRoute
   ApiRechargeProductsRoute: typeof ApiRechargeProductsRoute
   ApiRechargeStatusRoute: typeof ApiRechargeStatusRoute
@@ -232,6 +245,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiRechargeCreateRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/xunhupay-notify': {
+      id: '/api/public/xunhupay-notify'
+      path: '/api/public/xunhupay-notify'
+      fullPath: '/api/public/xunhupay-notify'
+      preLoaderRoute: typeof ApiPublicXunhupayNotifyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/media-stream': {
       id: '/api/public/media-stream'
       path: '/api/public/media-stream'
@@ -269,6 +289,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiParseRoute: ApiParseRoute,
   ApiPublicMediaProxyRoute: ApiPublicMediaProxyRoute,
   ApiPublicMediaStreamRoute: ApiPublicMediaStreamRoute,
+  ApiPublicXunhupayNotifyRoute: ApiPublicXunhupayNotifyRoute,
   ApiRechargeCreateRoute: ApiRechargeCreateRoute,
   ApiRechargeProductsRoute: ApiRechargeProductsRoute,
   ApiRechargeStatusRoute: ApiRechargeStatusRoute,
