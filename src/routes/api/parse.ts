@@ -91,27 +91,25 @@ async function parseOverseas(url: string, proxy: string) {
     ];
     if (proxy) args.push("--proxy", proxy);
 
-    const { stdout } = await new Promise<{ stdout: string; stderr: string }>(
-      (resolve, reject) => {
-        execFile(
-          configuredPath,
-          args,
-          {
-            encoding: "utf8",
-            timeout: 55_000,
-            maxBuffer: 20 * 1024 * 1024,
-            env: { ...process.env, PYTHONIOENCODING: "utf-8" },
-          },
-          (error, stdout, stderr) => {
-            if (error) {
-              reject(Object.assign(error, { stdout, stderr }));
-              return;
-            }
-            resolve({ stdout: String(stdout || ""), stderr: String(stderr || "") });
-          },
-        );
-      },
-    );
+    const { stdout } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      execFile(
+        configuredPath,
+        args,
+        {
+          encoding: "utf8",
+          timeout: 55_000,
+          maxBuffer: 20 * 1024 * 1024,
+          env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+        },
+        (error, stdout, stderr) => {
+          if (error) {
+            reject(Object.assign(error, { stdout, stderr }));
+            return;
+          }
+          resolve({ stdout: String(stdout || ""), stderr: String(stderr || "") });
+        },
+      );
+    });
 
     const info: any = JSON.parse(stdout);
     const audioFmt =
@@ -142,14 +140,10 @@ async function handle(request: Request): Promise<Response> {
   const accessToken = m[1];
 
   const { createClient } = await import("@supabase/supabase-js");
-  const userSb = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_PUBLISHABLE_KEY!,
-    {
-      global: { headers: { Authorization: `Bearer ${accessToken}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    },
-  );
+  const userSb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_PUBLISHABLE_KEY!, {
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
   const { data: userData, error: userErr } = await userSb.auth.getUser(accessToken);
   if (userErr || !userData.user) return json({ error: "登录无效" }, 401);
 
