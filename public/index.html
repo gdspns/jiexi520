@@ -425,6 +425,7 @@
         // 构造同源媒体代理 URL，让 <audio>/<video> 与 fetch 都能稳定加载远端 CDN
         function proxify(u) {
             if (!u) return u;
+            if (u.startsWith('/api/public/media-stream')) return u;
             if (u.startsWith('/api/public/media-proxy')) return u;
             return '/api/public/media-proxy?url=' + encodeURIComponent(u);
         }

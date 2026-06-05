@@ -15,6 +15,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiParseRouteImport } from './routes/api/parse'
 import { Route as ApiConfigRouteImport } from './routes/api/config'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
+import { Route as ApiPublicMediaStreamRouteImport } from './routes/api/public/media-stream'
 import { Route as ApiPublicMediaProxyRouteImport } from './routes/api/public/media-proxy'
 
 const AuthRoute = AuthRouteImport.update({
@@ -46,6 +47,11 @@ const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const ApiPublicMediaStreamRoute = ApiPublicMediaStreamRouteImport.update({
+  id: '/api/public/media-stream',
+  path: '/api/public/media-stream',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicMediaProxyRoute = ApiPublicMediaProxyRouteImport.update({
   id: '/api/public/media-proxy',
   path: '/api/public/media-proxy',
@@ -59,6 +65,7 @@ export interface FileRoutesByFullPath {
   '/api/config': typeof ApiConfigRoute
   '/api/parse': typeof ApiParseRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
+  '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -67,6 +74,7 @@ export interface FileRoutesByTo {
   '/api/config': typeof ApiConfigRoute
   '/api/parse': typeof ApiParseRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
+  '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -77,6 +85,7 @@ export interface FileRoutesById {
   '/api/config': typeof ApiConfigRoute
   '/api/parse': typeof ApiParseRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
+  '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -87,6 +96,7 @@ export interface FileRouteTypes {
     | '/api/config'
     | '/api/parse'
     | '/api/public/media-proxy'
+    | '/api/public/media-stream'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -95,6 +105,7 @@ export interface FileRouteTypes {
     | '/api/config'
     | '/api/parse'
     | '/api/public/media-proxy'
+    | '/api/public/media-stream'
   id:
     | '__root__'
     | '/'
@@ -104,6 +115,7 @@ export interface FileRouteTypes {
     | '/api/config'
     | '/api/parse'
     | '/api/public/media-proxy'
+    | '/api/public/media-stream'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -113,6 +125,7 @@ export interface RootRouteChildren {
   ApiConfigRoute: typeof ApiConfigRoute
   ApiParseRoute: typeof ApiParseRoute
   ApiPublicMediaProxyRoute: typeof ApiPublicMediaProxyRoute
+  ApiPublicMediaStreamRoute: typeof ApiPublicMediaStreamRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -159,6 +172,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/api/public/media-stream': {
+      id: '/api/public/media-stream'
+      path: '/api/public/media-stream'
+      fullPath: '/api/public/media-stream'
+      preLoaderRoute: typeof ApiPublicMediaStreamRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/media-proxy': {
       id: '/api/public/media-proxy'
       path: '/api/public/media-proxy'
@@ -188,6 +208,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiConfigRoute: ApiConfigRoute,
   ApiParseRoute: ApiParseRoute,
   ApiPublicMediaProxyRoute: ApiPublicMediaProxyRoute,
+  ApiPublicMediaStreamRoute: ApiPublicMediaStreamRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
