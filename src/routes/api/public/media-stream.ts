@@ -52,7 +52,9 @@ async function handle(request: Request): Promise<Response> {
     "-o",
     "-",
   ];
-  args.splice(1, 0, "-f", type === "audio" ? "bestaudio/best" : "best[ext=mp4]/best");
+  // TikTok usually serves a progressive mp4 with the audio track included.
+  // Using a progressive mp4 keeps playback/download compatible without ffmpeg.
+  args.splice(1, 0, "-f", "best[ext=mp4]/best");
 
   const child = spawn(configuredPath, args, {
     stdio: ["ignore", "pipe", "pipe"],
@@ -80,7 +82,7 @@ async function handle(request: Request): Promise<Response> {
   });
 
   const headers = new Headers(CORS);
-  headers.set("Content-Type", type === "audio" ? "audio/mpeg" : "video/mp4");
+  headers.set("Content-Type", "video/mp4");
   headers.set("Cache-Control", "no-store");
   headers.set("Accept-Ranges", "none");
   if (request.method === "HEAD") return new Response(null, { status: 200, headers });
