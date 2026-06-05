@@ -963,6 +963,14 @@
           : `<i class="fa-solid fa-coins"></i> 剩余 ${userCredits ?? "—"} 次`;
         credit.style.cssText = `font-size:12px;padding:6px 10px;border-radius:8px;border:1px solid ${low ? "#ef4444" : "#334155"};background:rgba(15,23,42,0.7);color:${low ? "#fca5a5" : "#fde68a"};font-weight:600;`;
         bar.appendChild(credit);
+        // 充值入口 (普通用户)
+        if (!isAdmin) {
+          const recharge = document.createElement("button");
+          recharge.innerHTML = '<i class="fa-solid fa-bolt"></i> 充值';
+          recharge.style.cssText = btnStyle + "background:linear-gradient(to right,#f59e0b,#ef4444);border-color:transparent;color:#fff;";
+          recharge.onclick = () => window.__openRecharge && window.__openRecharge();
+          bar.appendChild(recharge);
+        }
         if (isAdmin) {
           const adm = document.createElement("a");
           adm.textContent = "管理后台";
