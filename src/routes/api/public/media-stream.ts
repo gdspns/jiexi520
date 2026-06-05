@@ -78,7 +78,12 @@ async function handle(request: Request): Promise<Response> {
   ];
   // TikTok usually serves a progressive mp4 with the audio track included.
   // Using a progressive mp4 keeps playback/download compatible without ffmpeg.
-  args.splice(1, 0, "-f", "best[ext=mp4]/best");
+  args.splice(
+    1,
+    0,
+    "-f",
+    type === "audio" ? "bestaudio[ext=m4a]/bestaudio/best[ext=mp4]/best" : "best[ext=mp4]/best",
+  );
   if (proxy) args.push("--proxy", proxy);
 
   const child = spawn(configuredPath, args, {
