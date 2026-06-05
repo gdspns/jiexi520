@@ -77,25 +77,77 @@ async function handle(request: Request): Promise<Response> {
   const referer = pickRefererForSource(target);
   const format =
     type === "audio" ? "bestaudio[ext=m4a]/bestaudio/best[ext=mp4]/best" : "best[ext=mp4]/best";
+  const UA_DESKTOP =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+  const UA_MOBILE =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+  const isTikTok = /tiktok\.com/i.test(target);
+
+  // 与 parse.ts 保持一致的多策略，确保解析成功的链接也能成功流式下载
+  const strategies: { ua: string; extractor?: string }[] = isTikTok
+    ? [
+        { ua: UA_DESKTOP },
+        { ua: UA_DESKTOP, extractor: "tiktok:api_hostname=api22-normal-c-useast1a.tiktokv.com" },
+        { ua: UA_DESKTOP, extractor: "tiktok:api_hostname=api16-normal-c-useast2a.tiktokv.com" },
+        { ua: UA_MOBILE, extractor: "tiktok:app_name=trill;app_version=34.1.2;manifest_app_version=2023401020" },
+        { ua: UA_DESKTOP, extractor: "tiktok:webpage_url_basename=video" },
+      ]
+    : [{ ua: UA_DESKTOP }];
+
+  // 先用 --simulate 探测哪个策略能取到媒体，再用同样参数拉流，避免响应头已发送但拉流失败
+  const { execFile } = await import("node:child_process");
+  let chosen: typeof strategies[number] | null = null;
+  let lastErr = "";
+  for (const s of strategies) {
+    const probeArgs = [
+      "-f", format,
+      "--simulate", "--get-url",
+      "--no-warnings", "--no-check-certificates",
+      "--socket-timeout", "20",
+      "--geo-bypass",
+      "--add-header", `referer:${referer}`,
+      "--add-header", `user-agent:${s.ua}`,
+    ];
+    if (s.extractor) probeArgs.push("--extractor-args", s.extractor);
+    if (proxy) probeArgs.push("--proxy", proxy);
+    probeArgs.push(target);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        execFile(
+          configuredPath,
+          probeArgs,
+          { encoding: "utf8", timeout: 25_000, maxBuffer: 4 * 1024 * 1024,
+            env: { ...process.env, PYTHONIOENCODING: "utf-8" } },
+          (error, stdout, stderr) => {
+            if (error) { lastErr = String(stderr || error.message); reject(error); return; }
+            if (!String(stdout || "").trim()) { lastErr = "empty url"; reject(new Error("empty")); return; }
+            resolve();
+          },
+        );
+      });
+      chosen = s;
+      break;
+    } catch {
+      // try next
+    }
+  }
+  if (!chosen) {
+    console.error("[api/media-stream] all strategies failed", lastErr.slice(0, 800));
+    return new Response("stream unavailable", { status: 502, headers: CORS });
+  }
+
   const args = [
-    "-f",
-    format,
-    "--no-warnings",
-    "--no-check-certificates",
-    "--socket-timeout",
-    "30",
-    "--retries",
-    "3",
+    "-f", format,
+    "--no-warnings", "--no-check-certificates",
+    "--socket-timeout", "30",
+    "--retries", "3",
     "--geo-bypass",
-    "--add-header",
-    `referer:${referer}`,
-    "--add-header",
-    "user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "-o",
-    "-",
-    target,
+    "--add-header", `referer:${referer}`,
+    "--add-header", `user-agent:${chosen.ua}`,
   ];
-  if (proxy) args.splice(-1, 0, "--proxy", proxy);
+  if (chosen.extractor) args.push("--extractor-args", chosen.extractor);
+  if (proxy) args.push("--proxy", proxy);
+  args.push("-o", "-", target);
 
   const child = spawn(configuredPath, args, {
     stdio: ["ignore", "pipe", "pipe"],
