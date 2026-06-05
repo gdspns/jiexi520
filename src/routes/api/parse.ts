@@ -67,7 +67,10 @@ async function parseOverseas(url: string, proxy: string) {
   let ytdlp: any;
   try {
     const mod: any = await import("youtube-dl-exec");
-    ytdlp = mod.default ?? mod;
+    const createYtdlp = mod.create ?? mod.default?.create;
+    const configuredPath = process.env.YOUTUBE_DL_PATH || "/usr/local/bin/yt-dlp";
+    const fs = await import("node:fs");
+    ytdlp = createYtdlp && fs.existsSync(configuredPath) ? createYtdlp(configuredPath) : (mod.default ?? mod);
   } catch (e: any) {
     throw new Error(
       "海外解析引擎 (yt-dlp) 在当前运行环境不可用。请部署到 Node.js 环境（如 Zeabur）后使用。",
@@ -79,7 +82,11 @@ async function parseOverseas(url: string, proxy: string) {
       noWarnings: true,
       noCheckCertificates: true,
       preferFreeFormats: true,
-      addHeader: ["referer:youtube.com", "user-agent:Mozilla/5.0"],
+      socketTimeout: 30,
+      addHeader: [
+        "referer:https://www.tiktok.com/",
+        "user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      ],
     };
     if (proxy) opts.proxy = proxy;
     const info: any = await ytdlp(url, opts);
