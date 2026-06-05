@@ -8,3 +8,13 @@
 如果 Zeabur 仍然显示 Node.js 24，说明它没有读取到最新仓库根目录的 `Dockerfile`，请确认已提交并推送 `Dockerfile`、`.dockerignore`、`zbpack.json` 后重新部署，必要时在 Zeabur 里清理缓存/重新创建服务。
 
 首页文件保留在 `public/index.html`。构建时它会被复制到网站根路径 `/index.html`，应用根路径 `/` 会服务端重定向到 `/index.html`，不需要把它移动到仓库根目录。
+
+Zeabur 环境变量至少需要以下 5 个后端/前端变量，名称必须完全一致：
+
+- `SUPABASE_URL`
+- `SUPABASE_PUBLISHABLE_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
+
+其中 `SUPABASE_SERVICE_ROLE_KEY` 是管理员封禁、删除用户等服务端管理操作需要的私密密钥；只配置 publishable key 不够。
