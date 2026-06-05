@@ -9,12 +9,11 @@
 
 首页文件保留在 `public/index.html`。构建时它会被复制到网站根路径 `/index.html`，应用根路径 `/` 会服务端重定向到 `/index.html`，不需要把它移动到仓库根目录。
 
-Zeabur 环境变量至少需要以下 5 个后端/前端变量，名称必须完全一致：
+Zeabur 环境变量至少需要以下 4 个后端/前端变量，名称必须完全一致：
 
 - `SUPABASE_URL`
 - `SUPABASE_PUBLISHABLE_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_PUBLISHABLE_KEY`
 
-其中 `SUPABASE_SERVICE_ROLE_KEY` 是管理员封禁、删除用户等服务端管理操作需要的私密密钥；只配置 publishable key 不够。
+管理员后台已改为通过应用服务端权限校验；部署时不需要在 Zeabur 手动配置 `SUPABASE_SERVICE_ROLE_KEY`。

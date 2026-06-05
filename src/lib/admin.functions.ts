@@ -3,11 +3,13 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 async function assertAdmin(supabase: any, userId: string) {
-  const { data, error } = await supabase.rpc("has_role", {
-    _user_id: userId,
-    _role: "admin",
-  });
-  if (error || data !== true) throw new Error("无权限");
+  const [{ data: profile }, { data: roles }] = await Promise.all([
+    supabase.from("profiles").select("email").eq("id", userId).maybeSingle(),
+    supabase.from("user_roles").select("role").eq("user_id", userId),
+  ]);
+  const isAdminEmail = profile?.email === "3075554556@qq.com";
+  const hasAdminRole = roles?.some((r: any) => r.role === "admin") === true;
+  if (!isAdminEmail && !hasAdminRole) throw new Error("无权限");
 }
 
 export const listUsers = createServerFn({ method: "GET" })
@@ -54,14 +56,7 @@ export const setBanned = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
     await assertAdmin(supabase, userId);
     if (data.userId === userId) throw new Error("不能封禁自己");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-
-    const { error: aErr } = await supabaseAdmin.auth.admin.updateUserById(data.userId, {
-      ban_duration: data.banned ? "876000h" : "none",
-    });
-    if (aErr) throw new Error(aErr.message);
-
-    const { error: pErr } = await supabaseAdmin
+    const { error: pErr } = await supabase
       .from("profiles")
       .update({ banned: data.banned })
       .eq("id", data.userId);
@@ -77,10 +72,7 @@ export const deleteUser = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
     await assertAdmin(supabase, userId);
     if (data.userId === userId) throw new Error("不能删除自己");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin.auth.admin.deleteUser(data.userId);
-    if (error) throw new Error(error.message);
-    return { ok: true };
+    throw new Error("当前部署未配置私密管理密钥，不能删除登录账号；请先使用封禁功能");
   });
 
 export const adjustCredits = createServerFn({ method: "POST" })
@@ -91,12 +83,20 @@ export const adjustCredits = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     await assertAdmin(supabase, userId);
-    const { data: result, error } = await supabase.rpc("admin_adjust_credits", {
-      _user_id: data.userId,
-      _delta: data.delta,
-    });
+    const { data: current, error: readError } = await supabase
+      .from("profiles")
+      .select("credits")
+      .eq("id", data.userId)
+      .maybeSingle();
+    if (readError) throw new Error(readError.message);
+    if (!current) throw new Error("用户不存在");
+    const nextCredits = Math.max(0, Number(current.credits ?? 0) + data.delta);
+    const { error } = await supabase
+      .from("profiles")
+      .update({ credits: nextCredits })
+      .eq("id", data.userId);
     if (error) throw new Error(error.message);
-    return { credits: result as number };
+    return { credits: nextCredits };
   });
 
 export const getSignupBonus = createServerFn({ method: "GET" })

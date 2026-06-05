@@ -107,8 +107,16 @@ async function handle(request: Request): Promise<Response> {
   if (!m) return json({ error: "未登录" }, 401);
   const accessToken = m[1];
 
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(accessToken);
+  const { createClient } = await import("@supabase/supabase-js");
+  const userSb = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_PUBLISHABLE_KEY!,
+    {
+      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    },
+  );
+  const { data: userData, error: userErr } = await userSb.auth.getUser(accessToken);
   if (userErr || !userData.user) return json({ error: "登录无效" }, 401);
 
   let body: any;
@@ -122,7 +130,7 @@ async function handle(request: Request): Promise<Response> {
   if (url.length > 1000) return json({ error: "URL 过长" }, 400);
 
   // 读取配置
-  const { data: cfgRows } = await supabaseAdmin
+  const { data: cfgRows } = await userSb
     .from("app_settings")
     .select("key,value")
     .in("key", ["api_endpoint", "api_token", "api_proxy"]);
@@ -145,16 +153,6 @@ async function handle(request: Request): Promise<Response> {
   }
 
   // 解析成功后扣除积分（管理员不扣）
-  // 使用以用户身份调用的 supabase client 走 RPC，保证 auth.uid() 正确
-  const { createClient } = await import("@supabase/supabase-js");
-  const userSb = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_PUBLISHABLE_KEY!,
-    {
-      global: { headers: { Authorization: `Bearer ${accessToken}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    },
-  );
   const { data: remaining, error: consumeErr } = await userSb.rpc("consume_credit");
   if (consumeErr) {
     return json({ error: consumeErr.message || "扣减积分失败" }, 402);

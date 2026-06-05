@@ -87,6 +87,7 @@ export type Database = {
         Returns: number
       }
       consume_credit: { Args: never; Returns: number }
+      consume_credit_for_user: { Args: { _user_id: string }; Returns: number }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
