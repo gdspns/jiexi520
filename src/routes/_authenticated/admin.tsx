@@ -36,6 +36,11 @@ function AdminPage() {
   const saveBonus = useServerFn(setSignupBonus);
   const getCfg = useServerFn(getApiConfig);
   const saveCfg = useServerFn(setApiConfig);
+  const getPayCfg = useServerFn(getPaymentConfig);
+  const savePayCfg = useServerFn(setPaymentConfig);
+  const listProds = useServerFn(listProductsAdmin);
+  const saveProd = useServerFn(upsertProduct);
+  const removeProd = useServerFn(deleteProduct);
   const [busy, setBusy] = useState<string | null>(null);
   const [bonus, setBonus] = useState<number | "">("");
   const [savingBonus, setSavingBonus] = useState(false);
@@ -47,6 +52,40 @@ function AdminPage() {
   const [savingCfg, setSavingCfg] = useState(false);
   const [defaults, setDefaults] = useState<{ endpoint: string; token: string; proxy: string } | null>(null);
 
+  // 支付配置
+  const [payCfg, setPayCfg] = useState({
+    wechat_appid: "", wechat_appsecret: "", wechat_enabled: false,
+    alipay_appid: "", alipay_appsecret: "", alipay_enabled: false,
+    api_endpoint: "https://api.xunhupay.com/payment/do.html",
+  });
+  const [showWxSecret, setShowWxSecret] = useState(false);
+  const [showAliSecret, setShowAliSecret] = useState(false);
+  const [savingPay, setSavingPay] = useState(false);
+
+  // 商品
+  type Product = {
+    id?: string;
+    name: string;
+    price: number;
+    credits: number;
+    discount_price: number | null;
+    enabled: boolean;
+    sort_order: number;
+    _editing?: boolean;
+  };
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loadingProds, setLoadingProds] = useState(false);
+
+  const reloadProducts = async () => {
+    setLoadingProds(true);
+    try {
+      const rows = await listProds();
+      setProducts(rows as any);
+    } finally {
+      setLoadingProds(false);
+    }
+  };
+
   useEffect(() => {
     getBonus().then((r) => setBonus(r.value)).catch(() => {});
     getCfg()
@@ -57,7 +96,64 @@ function AdminPage() {
         setDefaults(r.defaults);
       })
       .catch(() => {});
+    getPayCfg().then((r: any) => setPayCfg({
+      wechat_appid: r.wechat_appid || "",
+      wechat_appsecret: r.wechat_appsecret || "",
+      wechat_enabled: !!r.wechat_enabled,
+      alipay_appid: r.alipay_appid || "",
+      alipay_appsecret: r.alipay_appsecret || "",
+      alipay_enabled: !!r.alipay_enabled,
+      api_endpoint: r.api_endpoint || "https://api.xunhupay.com/payment/do.html",
+    })).catch(() => {});
+    reloadProducts().catch(() => {});
   }, []);
+
+  const onSavePay = async () => {
+    if (!/^https?:\/\//i.test(payCfg.api_endpoint)) return alert("接口地址必须以 http(s):// 开头");
+    setSavingPay(true);
+    try {
+      await savePayCfg({ data: payCfg });
+      alert("支付配置已保存");
+    } catch (e: any) {
+      alert(e?.message || "保存失败");
+    } finally {
+      setSavingPay(false);
+    }
+  };
+
+  const onSaveProduct = async (p: Product) => {
+    if (!p.name.trim()) return alert("请填写商品名称");
+    if (!Number.isFinite(p.price) || p.price < 0) return alert("价格非法");
+    if (!Number.isFinite(p.credits) || p.credits < 0) return alert("次数非法");
+    try {
+      await saveProd({ data: {
+        id: p.id,
+        name: p.name.trim(),
+        price: Math.round(p.price),
+        credits: Math.round(p.credits),
+        discount_price: p.discount_price == null || isNaN(p.discount_price as any) ? null : Math.round(p.discount_price),
+        enabled: p.enabled,
+        sort_order: Math.round(p.sort_order || 0),
+      }});
+      await reloadProducts();
+    } catch (e: any) {
+      alert(e?.message || "保存失败");
+    }
+  };
+
+  const onDeleteProduct = async (id?: string) => {
+    if (!id) { setProducts((arr) => arr.filter((x) => x.id)); return; }
+    if (!confirm("确定删除该商品？")) return;
+    try { await removeProd({ data: { id } }); await reloadProducts(); }
+    catch (e: any) { alert(e?.message || "删除失败"); }
+  };
+
+  const addNewProduct = () => {
+    setProducts((arr) => [
+      ...arr,
+      { name: "", price: 0, credits: 0, discount_price: null, enabled: true, sort_order: 0, _editing: true },
+    ]);
+  };
 
   const onSaveBonus = async () => {
     const v = typeof bonus === "number" ? bonus : parseInt(String(bonus), 10);
