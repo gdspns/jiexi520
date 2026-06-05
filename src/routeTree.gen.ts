@@ -15,6 +15,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiParseRouteImport } from './routes/api/parse'
 import { Route as ApiConfigRouteImport } from './routes/api/config'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
+import { Route as ApiRechargeProductsRouteImport } from './routes/api/recharge/products'
 import { Route as ApiPublicMediaStreamRouteImport } from './routes/api/public/media-stream'
 import { Route as ApiPublicMediaProxyRouteImport } from './routes/api/public/media-proxy'
 
@@ -47,6 +48,11 @@ const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const ApiRechargeProductsRoute = ApiRechargeProductsRouteImport.update({
+  id: '/api/recharge/products',
+  path: '/api/recharge/products',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicMediaStreamRoute = ApiPublicMediaStreamRouteImport.update({
   id: '/api/public/media-stream',
   path: '/api/public/media-stream',
@@ -66,6 +72,7 @@ export interface FileRoutesByFullPath {
   '/api/parse': typeof ApiParseRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
+  '/api/recharge/products': typeof ApiRechargeProductsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -75,6 +82,7 @@ export interface FileRoutesByTo {
   '/api/parse': typeof ApiParseRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
+  '/api/recharge/products': typeof ApiRechargeProductsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -86,6 +94,7 @@ export interface FileRoutesById {
   '/api/parse': typeof ApiParseRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
+  '/api/recharge/products': typeof ApiRechargeProductsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -97,6 +106,7 @@ export interface FileRouteTypes {
     | '/api/parse'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
+    | '/api/recharge/products'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -106,6 +116,7 @@ export interface FileRouteTypes {
     | '/api/parse'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
+    | '/api/recharge/products'
   id:
     | '__root__'
     | '/'
@@ -116,6 +127,7 @@ export interface FileRouteTypes {
     | '/api/parse'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
+    | '/api/recharge/products'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -126,6 +138,7 @@ export interface RootRouteChildren {
   ApiParseRoute: typeof ApiParseRoute
   ApiPublicMediaProxyRoute: typeof ApiPublicMediaProxyRoute
   ApiPublicMediaStreamRoute: typeof ApiPublicMediaStreamRoute
+  ApiRechargeProductsRoute: typeof ApiRechargeProductsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -172,6 +185,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/api/recharge/products': {
+      id: '/api/recharge/products'
+      path: '/api/recharge/products'
+      fullPath: '/api/recharge/products'
+      preLoaderRoute: typeof ApiRechargeProductsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/media-stream': {
       id: '/api/public/media-stream'
       path: '/api/public/media-stream'
@@ -209,7 +229,18 @@ const rootRouteChildren: RootRouteChildren = {
   ApiParseRoute: ApiParseRoute,
   ApiPublicMediaProxyRoute: ApiPublicMediaProxyRoute,
   ApiPublicMediaStreamRoute: ApiPublicMediaStreamRoute,
+  ApiRechargeProductsRoute: ApiRechargeProductsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
