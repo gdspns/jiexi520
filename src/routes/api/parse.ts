@@ -64,32 +64,54 @@ async function parseDomestic(url: string, endpoint: string, token: string) {
 }
 
 async function parseOverseas(url: string, proxy: string) {
-  let ytdlp: any;
+  const configuredPath = process.env.YOUTUBE_DL_PATH || "/usr/local/bin/yt-dlp";
   try {
-    const mod: any = await import("youtube-dl-exec");
-    const createYtdlp = mod.create ?? mod.default?.create;
-    const configuredPath = process.env.YOUTUBE_DL_PATH || "/usr/local/bin/yt-dlp";
     const fs = await import("node:fs");
-    ytdlp = createYtdlp && fs.existsSync(configuredPath) ? createYtdlp(configuredPath) : (mod.default ?? mod);
+    fs.accessSync(configuredPath, fs.constants.X_OK);
   } catch (e: any) {
     throw new Error(
-      "海外解析引擎 (yt-dlp) 在当前运行环境不可用。请部署到 Node.js 环境（如 Zeabur）后使用。",
+      `海外解析引擎 (yt-dlp) 不可用或不可执行：${configuredPath}。请确认 Zeabur 使用 Dockerfile 构建。`,
     );
   }
+
   try {
-    const opts: Record<string, any> = {
-      dumpSingleJson: true,
-      noWarnings: true,
-      noCheckCertificates: true,
-      preferFreeFormats: true,
-      socketTimeout: 30,
-      addHeader: [
-        "referer:https://www.tiktok.com/",
-        "user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      ],
-    };
-    if (proxy) opts.proxy = proxy;
-    const info: any = await ytdlp(url, opts);
+    const { execFile } = await import("node:child_process");
+    const args = [
+      url,
+      "--dump-single-json",
+      "--no-warnings",
+      "--no-check-certificates",
+      "--prefer-free-formats",
+      "--socket-timeout",
+      "30",
+      "--add-header",
+      "referer:https://www.tiktok.com/",
+      "--add-header",
+      "user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    ];
+    if (proxy) args.push("--proxy", proxy);
+
+    const { stdout } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      execFile(
+        configuredPath,
+        args,
+        {
+          encoding: "utf8",
+          timeout: 55_000,
+          maxBuffer: 20 * 1024 * 1024,
+          env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+        },
+        (error, stdout, stderr) => {
+          if (error) {
+            reject(Object.assign(error, { stdout, stderr }));
+            return;
+          }
+          resolve({ stdout: String(stdout || ""), stderr: String(stderr || "") });
+        },
+      );
+    });
+
+    const info: any = JSON.parse(stdout);
     const audioFmt =
       (info.formats || []).find((f: any) => f.acodec && f.acodec !== "none" && (!f.vcodec || f.vcodec === "none")) ||
       null;
@@ -104,7 +126,9 @@ async function parseOverseas(url: string, proxy: string) {
       platform: determinePlatform(url),
     };
   } catch (e: any) {
-    throw new Error("海外解析失败：" + (e?.message || String(e)));
+    const raw = e?.stderr || e?.message || String(e);
+    const safe = proxy ? String(raw).replaceAll(proxy, "[proxy]") : String(raw);
+    throw new Error("海外解析失败：" + safe.slice(0, 1200));
   }
 }
 
@@ -137,10 +161,13 @@ async function handle(request: Request): Promise<Response> {
   if (url.length > 1000) return json({ error: "URL 过长" }, 400);
 
   // 读取配置
-  const { data: cfgRows } = await userSb
+  const { data: cfgRows, error: cfgError } = await userSb
     .from("app_settings")
     .select("key,value")
     .in("key", ["api_endpoint", "api_token", "api_proxy"]);
+  if (cfgError) {
+    console.error("[api/parse] failed to read app_settings", cfgError);
+  }
   const cfgMap = new Map((cfgRows ?? []).map((r: any) => [r.key, r.value]));
   const normStr = (v: any, d: string) => (typeof v === "string" ? v : v == null ? d : String(v));
   const endpoint = normStr(cfgMap.get("api_endpoint"), DEFAULT_ENDPOINT);
@@ -156,6 +183,12 @@ async function handle(request: Request): Promise<Response> {
       result = await parseDomestic(url, endpoint, apiToken);
     }
   } catch (e: any) {
+    console.error("[api/parse] parse failed", {
+      platform: determinePlatform(url),
+      isOverseas: isOverseas(url),
+      hasProxy: Boolean(proxy),
+      message: e?.message || String(e),
+    });
     return json({ error: e?.message || "解析失败" }, 502);
   }
 
