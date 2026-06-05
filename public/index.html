@@ -9,6 +9,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- 引入 lamejs 用于纯前端真正 MP3 编码 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+    <!-- QR 生成（充值二维码） -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -961,6 +963,14 @@
           : `<i class="fa-solid fa-coins"></i> 剩余 ${userCredits ?? "—"} 次`;
         credit.style.cssText = `font-size:12px;padding:6px 10px;border-radius:8px;border:1px solid ${low ? "#ef4444" : "#334155"};background:rgba(15,23,42,0.7);color:${low ? "#fca5a5" : "#fde68a"};font-weight:600;`;
         bar.appendChild(credit);
+        // 充值入口 (普通用户)
+        if (!isAdmin) {
+          const recharge = document.createElement("button");
+          recharge.innerHTML = '<i class="fa-solid fa-bolt"></i> 充值';
+          recharge.style.cssText = btnStyle + "background:linear-gradient(to right,#f59e0b,#ef4444);border-color:transparent;color:#fff;";
+          recharge.onclick = () => window.__openRecharge && window.__openRecharge();
+          bar.appendChild(recharge);
+        }
         if (isAdmin) {
           const adm = document.createElement("a");
           adm.textContent = "管理后台";
@@ -1039,6 +1049,7 @@
       }
       window.__requireCredits = requireCredits;
       window.__consumeCredit = consumeOneCredit;
+      window.__refreshCredits = refreshAuth;
 
       // 拦截：单链接解析表单提交
       document.getElementById("convert-form")?.addEventListener("submit", (e) => {
@@ -1056,6 +1067,294 @@
         fi.addEventListener("click", (e) => {
           if (!requireCredits("本地转换")) { e.preventDefault(); e.stopImmediatePropagation(); }
         }, true);
+      }
+    </script>
+
+    <!-- ============ 充值弹窗 ============ -->
+    <div id="recharge-modal" class="hidden fixed inset-0 z-[10000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+          <h3 class="text-lg font-bold text-white"><i class="fa-solid fa-bolt text-yellow-400"></i> 充值次数</h3>
+          <button id="recharge-close" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+        </div>
+        <div id="recharge-body" class="p-5"></div>
+      </div>
+    </div>
+
+    <script type="module">
+      const sb = window.__sb;
+      const modal = document.getElementById("recharge-modal");
+      const body = document.getElementById("recharge-body");
+      const closeBtn = document.getElementById("recharge-close");
+      let pollTimer = null;
+      let countdownTimer = null;
+
+      function clearTimers() {
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+      }
+      function openModal() { modal.classList.remove("hidden"); }
+      function closeModal() {
+        modal.classList.add("hidden");
+        clearTimers();
+        body.innerHTML = "";
+        // 清理 URL 上的 recharge 参数
+        const u = new URL(location.href);
+        if (u.searchParams.has("recharge")) {
+          u.searchParams.delete("recharge");
+          history.replaceState({}, "", u.toString());
+        }
+      }
+      closeBtn.onclick = closeModal;
+      modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+
+      function fmtYuan(cents) { return (cents / 100).toFixed(2); }
+
+      async function loadProducts() {
+        body.innerHTML = '<div class="text-center text-slate-400 py-8"><div class="loader inline-block"></div><p class="mt-2 text-sm">加载商品中...</p></div>';
+        try {
+          const res = await fetch("/api/recharge/products");
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "加载失败");
+          if (!data.products?.length) {
+            body.innerHTML = '<p class="text-center text-slate-400 py-8">暂无可购买的商品，请联系管理员。</p>';
+            return;
+          }
+          if (!data.channels.wechat && !data.channels.alipay) {
+            body.innerHTML = '<p class="text-center text-red-400 py-8">支付未开放，请联系管理员。</p>';
+            return;
+          }
+          renderProducts(data.products, data.channels);
+        } catch (e) {
+          body.innerHTML = `<p class="text-center text-red-400 py-8">${e.message}</p>`;
+        }
+      }
+
+      function renderProducts(products, channels) {
+        let html = '<p class="text-xs text-slate-400 mb-3">选择一个充值套餐</p><div class="grid gap-3">';
+        for (const p of products) {
+          const finalPrice = p.discount_price ?? p.price;
+          const hasDiscount = p.discount_price != null && p.discount_price < p.price;
+          const discountPct = hasDiscount ? Math.round((1 - p.discount_price / p.price) * 100) : 0;
+          html += `
+            <div class="p-4 rounded-xl border border-slate-700 hover:border-pink-500 bg-slate-800/60 cursor-pointer transition product-card" data-id="${p.id}" data-name="${p.name}" data-credits="${p.credits}" data-amount="${finalPrice}">
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="font-bold text-white">${p.name}</p>
+                  <p class="text-xs text-slate-400 mt-1"><i class="fa-solid fa-coins text-yellow-400"></i> 赠送 <b class="text-yellow-300">${p.credits}</b> 次解析</p>
+                </div>
+                <div class="text-right">
+                  ${hasDiscount ? `<p class="text-xs text-slate-500 line-through">¥${fmtYuan(p.price)}</p><p class="text-xl font-bold text-pink-400">¥${fmtYuan(finalPrice)}</p><span class="inline-block mt-1 px-2 py-0.5 rounded bg-red-500/20 text-red-300 text-[10px]">-${discountPct}%</span>` : `<p class="text-xl font-bold text-pink-400">¥${fmtYuan(finalPrice)}</p>`}
+                </div>
+              </div>
+            </div>`;
+        }
+        html += "</div>";
+        body.innerHTML = html;
+        body.querySelectorAll(".product-card").forEach((el) => {
+          el.addEventListener("click", () => selectChannel(el.dataset, channels));
+        });
+      }
+
+      function selectChannel(prod, channels) {
+        let html = `<button id="recharge-back" class="text-xs text-slate-400 hover:text-white mb-3"><i class="fa-solid fa-arrow-left"></i> 返回</button>
+          <div class="mb-4 p-3 rounded-lg bg-slate-800/60 text-sm">
+            <p class="text-white font-bold">${prod.name}</p>
+            <p class="text-xs text-slate-400 mt-1">应付 <span class="text-pink-400 font-bold text-base">¥${fmtYuan(prod.amount)}</span> · 到账 <span class="text-yellow-300 font-bold">${prod.credits}</span> 次</p>
+          </div>
+          <p class="text-xs text-slate-400 mb-2">请选择支付方式</p>
+          <div class="grid grid-cols-2 gap-3">`;
+        if (channels.wechat) {
+          html += `<button class="channel-btn p-4 rounded-xl border border-slate-700 hover:border-green-500 bg-slate-800/60 transition" data-channel="wechat"><i class="fa-brands fa-weixin text-3xl text-green-400"></i><p class="text-sm mt-2 text-white">微信支付</p></button>`;
+        }
+        if (channels.alipay) {
+          html += `<button class="channel-btn p-4 rounded-xl border border-slate-700 hover:border-blue-500 bg-slate-800/60 transition" data-channel="alipay"><i class="fa-brands fa-alipay text-3xl text-blue-400"></i><p class="text-sm mt-2 text-white">支付宝</p></button>`;
+        }
+        html += "</div>";
+        body.innerHTML = html;
+        body.querySelector("#recharge-back").onclick = () => loadProducts();
+        body.querySelectorAll(".channel-btn").forEach((btn) => {
+          btn.addEventListener("click", () => createOrder(prod.id, btn.dataset.channel));
+        });
+      }
+
+      async function createOrder(productId, channel) {
+        body.innerHTML = '<div class="text-center text-slate-400 py-8"><div class="loader inline-block"></div><p class="mt-2 text-sm">正在创建订单...</p></div>';
+        try {
+          const { data: sess } = await sb.auth.getSession();
+          const token = sess.session?.access_token;
+          if (!token) throw new Error("未登录");
+          const res = await fetch("/api/recharge/create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+            body: JSON.stringify({ product_id: productId, channel }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+          // 把 order_no 写入 URL，刷新可恢复
+          const u = new URL(location.href);
+          u.searchParams.set("recharge", data.order_no);
+          history.replaceState({}, "", u.toString());
+          renderWaiting(data);
+        } catch (e) {
+          body.innerHTML = `<p class="text-center text-red-400 py-8">${e.message}</p><div class="text-center"><button id="r-retry" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm">返回</button></div>`;
+          body.querySelector("#r-retry").onclick = () => loadProducts();
+        }
+      }
+
+      function renderWaiting(order) {
+        const channelName = order.channel === "wechat" ? "微信" : "支付宝";
+        const channelColor = order.channel === "wechat" ? "text-green-400" : "text-blue-400";
+        body.innerHTML = `
+          <div class="text-center">
+            <p class="text-sm text-slate-300 mb-1">使用 <b class="${channelColor}">${channelName}</b> 扫码支付</p>
+            <p class="text-xs text-slate-500 mb-3">订单号 ${order.order_no}</p>
+            <div id="qr-box" class="inline-block bg-white p-3 rounded-xl mb-3"></div>
+            <p class="text-2xl font-bold text-pink-400 mb-1">¥${fmtYuan(order.amount)}</p>
+            <p class="text-xs text-slate-400 mb-3">支付成功后自动到账 <span class="text-yellow-300 font-bold">${order.credits}</span> 次</p>
+            <div class="mb-3">
+              <p class="text-xs text-slate-400">支付剩余时间</p>
+              <p id="countdown" class="text-xl font-mono font-bold text-orange-400">--:--</p>
+            </div>
+            <a id="wap-btn" href="${order.wap_url}" target="_blank" rel="noopener" class="block w-full px-4 py-3 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white text-sm font-semibold mb-2">
+              <i class="fa-solid fa-mobile-screen"></i> 手机用户点这里 H5 跳转支付
+            </a>
+            <p id="r-status" class="text-xs text-slate-400 mt-2">⏳ 等待支付中...</p>
+            <button id="r-cancel" class="mt-3 text-xs text-slate-500 hover:text-slate-300 underline">取消并关闭</button>
+          </div>`;
+        // 渲染 QR
+        const qrBox = body.querySelector("#qr-box");
+        try {
+          if (order.qr_url) {
+            new QRCode(qrBox, { text: order.qr_url, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M });
+          } else {
+            qrBox.innerHTML = '<p class="text-slate-500 text-xs">无二维码</p>';
+          }
+        } catch (e) {
+          qrBox.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(order.qr_url || "")}" alt="QR" />`;
+        }
+        body.querySelector("#r-cancel").onclick = closeModal;
+
+        // 倒计时
+        const expiresAt = new Date(order.expires_at).getTime();
+        const cdEl = body.querySelector("#countdown");
+        const updateCd = () => {
+          const left = expiresAt - Date.now();
+          if (left <= 0) {
+            cdEl.textContent = "已超时";
+            cdEl.classList.add("text-red-500");
+            clearTimers();
+            body.querySelector("#r-status").innerHTML = '⛔ 订单已超时，<button id="r-restart" class="underline text-pink-400">重新下单</button>';
+            body.querySelector("#r-restart")?.addEventListener("click", () => loadProducts());
+            return;
+          }
+          const m = Math.floor(left / 60000);
+          const s = Math.floor((left % 60000) / 1000);
+          cdEl.textContent = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+        };
+        updateCd();
+        countdownTimer = setInterval(updateCd, 1000);
+
+        // 轮询订单状态
+        pollTimer = setInterval(() => pollOrder(order.order_no), 3000);
+      }
+
+      async function pollOrder(orderNo) {
+        try {
+          const { data: sess } = await sb.auth.getSession();
+          const token = sess.session?.access_token;
+          if (!token) return;
+          const res = await fetch("/api/recharge/status?order_no=" + encodeURIComponent(orderNo), {
+            headers: { "Authorization": "Bearer " + token },
+          });
+          const data = await res.json();
+          if (!res.ok) return;
+          const status = data.order.status;
+          if (status === "paid") {
+            clearTimers();
+            body.innerHTML = `
+              <div class="text-center py-6">
+                <i class="fa-solid fa-circle-check text-6xl text-green-400 mb-3"></i>
+                <p class="text-xl font-bold text-white mb-2">支付成功！</p>
+                <p class="text-sm text-slate-300">已到账 <b class="text-yellow-300">${data.order.credits}</b> 次，当前剩余 <b class="text-yellow-300">${data.credits}</b> 次</p>
+                <button id="r-done" class="mt-5 px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 text-white text-sm font-semibold">完成</button>
+              </div>`;
+            // 刷新顶部次数
+            try { window.__refreshCredits && (await window.__refreshCredits()); } catch {}
+            body.querySelector("#r-done").onclick = closeModal;
+          } else if (status === "expired" || status === "failed") {
+            clearTimers();
+            const cdEl = body.querySelector("#countdown");
+            if (cdEl) { cdEl.textContent = status === "expired" ? "已超时" : "失败"; cdEl.classList.add("text-red-500"); }
+            const st = body.querySelector("#r-status");
+            if (st) st.innerHTML = '⛔ 订单' + (status === "expired" ? "已超时" : "失败") + '，<button id="r-restart" class="underline text-pink-400">重新下单</button>';
+            body.querySelector("#r-restart")?.addEventListener("click", () => loadProducts());
+          }
+        } catch (e) { /* ignore */ }
+      }
+
+      async function resumeOrder(orderNo) {
+        openModal();
+        body.innerHTML = '<div class="text-center text-slate-400 py-8"><div class="loader inline-block"></div><p class="mt-2 text-sm">恢复订单中...</p></div>';
+        try {
+          const { data: sess } = await sb.auth.getSession();
+          const token = sess.session?.access_token;
+          if (!token) { closeModal(); return; }
+          const res = await fetch("/api/recharge/status?order_no=" + encodeURIComponent(orderNo), {
+            headers: { "Authorization": "Bearer " + token },
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "订单不存在");
+          if (data.order.status === "paid") {
+            // 已支付，直接显示成功
+            body.innerHTML = `<div class="text-center py-6"><i class="fa-solid fa-circle-check text-6xl text-green-400 mb-3"></i><p class="text-xl font-bold text-white mb-2">支付成功！</p><p class="text-sm text-slate-300">已到账 <b class="text-yellow-300">${data.order.credits}</b> 次，当前剩余 <b class="text-yellow-300">${data.credits}</b> 次</p><button id="r-done" class="mt-5 px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 text-white text-sm font-semibold">完成</button></div>`;
+            try { window.__refreshCredits && (await window.__refreshCredits()); } catch {}
+            body.querySelector("#r-done").onclick = closeModal;
+            return;
+          }
+          if (data.order.status !== "pending") {
+            body.innerHTML = `<p class="text-center text-red-400 py-6">订单已${data.order.status === "expired" ? "超时" : "失败"}</p><div class="text-center"><button id="r-back" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm">重新选择套餐</button></div>`;
+            body.querySelector("#r-back").onclick = () => loadProducts();
+            return;
+          }
+          renderWaiting({
+            order_no: data.order.order_no,
+            qr_url: data.order.qr_url,
+            wap_url: data.order.wap_url,
+            expires_at: data.order.expires_at,
+            amount: data.order.amount,
+            credits: data.order.credits,
+            product_name: data.order.product_name,
+            channel: data.order.channel,
+          });
+        } catch (e) {
+          body.innerHTML = `<p class="text-center text-red-400 py-6">${e.message}</p>`;
+        }
+      }
+
+      window.__openRecharge = () => {
+        if (!window.__sb) return;
+        sb.auth.getSession().then(({ data }) => {
+          if (!data.session) {
+            window.__requireLogin && window.__requireLogin("充值");
+            return;
+          }
+          openModal();
+          loadProducts();
+        });
+      };
+
+      // 自动恢复：URL 上带 ?recharge=ORDER_NO
+      const urlParams = new URLSearchParams(location.search);
+      const resumeNo = urlParams.get("recharge");
+      if (resumeNo) {
+        const tryResume = () => {
+          sb.auth.getSession().then(({ data }) => {
+            if (data.session) resumeOrder(resumeNo);
+          });
+        };
+        // 等 supabase 初始化
+        setTimeout(tryResume, 500);
       }
     </script>
 </body>

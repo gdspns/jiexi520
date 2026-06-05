@@ -1,54 +1,95 @@
-## 目标
+# 虎皮椒支付 + 充值商品系统
 
-把前端硬编码的解析 API 配置（`API_ENDPOINT` 和 `API_TOKEN`）迁移到后台管理面板，由管理员在网页里配置；当前默认值作为初始值写入数据库，不影响现有功能。
+## 一、数据库变更（一次迁移）
 
-## 实现步骤
+新增表：
+- `payment_config` — 虎皮椒配置（单行 key=default）
+  - `wechat_appid`, `wechat_appsecret`, `wechat_enabled`
+  - `alipay_appid`, `alipay_appsecret`, `alipay_enabled`
+  - `api_endpoint`（默认 `https://api.xunhupay.com/payment/do.html`）
+- `recharge_products` — 商品
+  - `id`, `name`, `price`(分), `credits`, `discount_price`(分, 可空), `enabled`, `sort_order`
+- `payment_orders` — 订单（防止刷新丢次数的核心）
+  - `id`(uuid), `order_no`(唯一), `user_id`, `product_id`, `credits`, `amount`(分), `channel`('wechat'|'alipay'), `status`('pending'|'paid'|'expired'|'failed'), `qr_url`, `wap_url`, `trade_order_id`(虎皮椒返回), `paid_at`, `created_at`, `expires_at`
 
-### 1. 数据库（迁移）
-在已存在的 `app_settings` 表中新增两条配置：
-- `key = 'api_endpoint'`，默认 `"https://v3.alapi.cn/api/video/url"`
-- `key = 'api_token'`，默认 `"jerv9kslg8kiuxute89fizcl06m5e1"`
+RLS：
+- `payment_config` / `recharge_products`：管理员可写；`recharge_products` 已启用项所有登录用户可读；`payment_config` 仅管理员可读
+- `payment_orders`：用户只能查/读自己的订单；服务端（service_role）回写状态
 
-用 `INSERT ... ON CONFLICT DO NOTHING`，不覆盖已有值。
+`recharge_products` 写一个 `update_updated_at` 触发器即可。
 
-### 2. 后端 server functions（`src/lib/admin.functions.ts`）
+## 二、后端 Server Functions（`src/lib/payment.functions.ts`）
 
-新增三个：
-- `getApiConfig`（管理员）：返回 `{ endpoint, token }`，从 `app_settings` 读取
-- `setApiConfig`（管理员）：入参 `{ endpoint, token }`，upsert 两条记录
-- `getPublicApiConfig`（仅需登录，不要 admin）：返回 `{ endpoint, token }` 给前端解析时使用 —— 因为 `app_settings` 表的 RLS 只允许管理员读，普通用户读不到，所以走 server fn 用 `supabaseAdmin` 透出
+管理员相关：
+- `getPaymentConfig` / `setPaymentConfig`
+- `listProductsAdmin` / `upsertProduct` / `deleteProduct`
 
-> 安全说明：这个 token 原本就硬编码在前端 HTML 里，任何访客都能看到，所以通过登录用户可读的接口透出不会降低安全级别；同时也避免在 admin 之外暴露给匿名用户。
+用户相关：
+- `listProducts` — 返回 enabled 商品
+- `createRechargeOrder({ productId, channel })`
+  1. 校验登录 + 商品 enabled
+  2. 生成 `order_no = LV + timestamp + 6位随机`
+  3. 按虎皮椒签名规则（MD5，参数按 key 字典序拼接 + `&key=appsecret`）POST 到 `api.xunhupay.com/payment/do.html`
+     - `type=WAP` 用于支付宝 H5；微信走 `type=WAP` 或扫码返回 url 渲染二维码
+     - `notify_url` → `/api/public/xunhupay-notify`
+     - `return_url` → `/recharge/result?order_no=...`
+  4. 落库 `payment_orders`（status=pending, expires_at=now+20min），返回 `{ order_no, qr_url, wap_url, expires_at }`
+- `getOrderStatus({ order_no })` — 前端轮询；只读自己的订单
 
-### 3. 管理后台 UI（`src/routes/_authenticated/admin.tsx`）
+## 三、Public 路由
 
-在"开通赠送"区块附近新增「API 配置」卡片：
-- 两个输入框：API 接口地址、API 密钥（token 用 password 类型，旁边带"显示/隐藏"切换）
-- 一个「保存」按钮
-- 一个「恢复默认」按钮（把两个值重置为当前硬编码默认值）
-- 加载时调用 `getApiConfig` 填入当前值
+- `src/routes/api/public/xunhupay-notify.ts`（POST）
+  1. 解析表单/JSON，按虎皮椒签名规则验签（用对应渠道的 appsecret）
+  2. 幂等：若订单已 paid 直接返回 `success`
+  3. 标记 `status=paid` + `paid_at` + `trade_order_id`
+  4. 用 `supabaseAdmin` 给用户 `profiles.credits += credits`（原子 update + RETURNING）
+  5. 返回纯文本 `success`
 
-### 4. 前端解析逻辑（`public/app.html`）
+## 四、前端
 
-- 删除硬编码常量 `API_ENDPOINT`、`API_TOKEN`
-- 新增模块级缓存 `let apiConfig = null;`
-- 新增 `async function loadApiConfig()`：用 `fetch('/_serverFn/...')` 不方便（serverFn 不易在静态 html 里调用），所以改为新增一个 **TanStack server route** `src/routes/api/config.ts`：
-  - `GET`，要求带用户 access_token（从 Authorization header 取）
-  - 校验 token 后用 `supabaseAdmin` 读 `app_settings` 返回 `{ endpoint, token }`
-- `app.html` 已有 Supabase 客户端（用于登录态），在 `fetchVideoDataAPI` 第一次调用前 `await loadApiConfig()`：
-  1. 取 `supabase.auth.getSession()` 拿 access_token
-  2. `fetch('/api/config', { headers: { Authorization: 'Bearer ' + token }})`
-  3. 缓存到 `apiConfig`
-- `fetchVideoDataAPI` 内部用 `apiConfig.endpoint` / `apiConfig.token` 替换原常量；其余流程完全不变（包括模拟数据回退分支：当 `apiConfig.token` 为空时仍走 mock）
+管理员后台（`src/routes/_authenticated/admin.tsx` 新增两个 section）：
+- **支付配置**：微信/支付宝两组 appid+appsecret+启用开关 + 保存
+- **充值商品管理**：表格 + 行内编辑（名称、原价、次数、折扣价、启用、排序）+ 新增/删除
 
-### 5. 不修改
+用户端：
+- 顶部新增「充值」入口（已登录显示）→ 打开 `<RechargeDialog />`
+- Dialog 展示商品卡片（显示原价/折扣价/赠送次数/单价折扣百分比），点选后进入支付方式选择（微信/支付宝，只显示已启用渠道）
+- 创建订单后进入 `<PaymentWaiting />`：
+  - 顶部 20 分钟倒计时（基于 `expires_at`）
+  - 居中二维码（`qr_url`，用 `qrcode` 库本地渲染避免外链）
+  - 下方「H5 跳转支付」按钮（`window.location = wap_url`，移动端可直接拉起）
+  - 每 3 秒调用 `getOrderStatus` 轮询；status=paid → 提示成功 + 调用 `refreshCredits` 刷新顶部次数 + 关闭
+- 防刷新丢单：订单状态在数据库，刷新后通过 URL `?order_no=` 或 localStorage 恢复等待页
 
-- 不动认证、credits 扣费、media-proxy、批量下载等
-- 默认值与现在硬编码值相同，已登录用户解析行为完全一致
+## 五、密钥与签名
 
-## 验证
+- 虎皮椒签名：`md5( sort(params).join('&') + appsecret )`，appsecret 即配置的"密钥"
+- 所有签名/请求只在 server fn 里执行，appsecret 永不出现在前端
+- 不需要 secrets 工具：商户号/密钥由管理员从后台 UI 填入，存 `payment_config` 表
 
-1. 管理员登录 → 后台「API 配置」显示当前默认值，可改写、保存、刷新后仍在
-2. 普通用户登录 → 解析一条链接 → 走的 endpoint/token 是数据库里那条，能正常解析
-3. 管理员把 token 清空保存 → 普通用户解析 → 走 mock 回退分支不报错
-4. Network 面板看不到前端源码再硬编码 token
+## 六、依赖
+
+`bun add qrcode @types/qrcode`（前端二维码渲染）
+
+## 技术要点
+
+- 订单号唯一索引保证幂等
+- `xunhupay-notify` 走 `/api/public/*` 绕过 auth
+- 加分逻辑只在 notify 中执行一次（基于订单 status 切换 + 唯一约束），轮询接口不加分
+- 倒计时用 `expires_at - now`，刷新不重置
+- 商品列表对所有登录用户开放读，避免每次走 server fn
+
+## 不做的事
+
+- 不做退款、对账、发票
+- 不做支付密码/二次验证
+- 不发邮件通知
+
+## 实施顺序
+
+1. 迁移（建表 + RLS + GRANT）
+2. `payment.functions.ts` + notify 路由 + 装 qrcode
+3. 管理员后台两个 section
+4. 前端充值入口 + Dialog + 等待页 + 顶部次数刷新
+
+确认无误后我就开始动工。
