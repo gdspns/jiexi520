@@ -55,7 +55,7 @@ async function handle(request: Request): Promise<Response> {
 
   if (request.method === "HEAD") {
     const headers = new Headers(CORS);
-    headers.set("Content-Type", "video/mp4");
+    headers.set("Content-Type", type === "audio" ? "audio/mp4" : "video/mp4");
     headers.set("Cache-Control", "no-store");
     headers.set("Accept-Ranges", "none");
     return new Response(null, { status: 200, headers });
@@ -107,7 +107,7 @@ async function handle(request: Request): Promise<Response> {
   });
 
   const headers = new Headers(CORS);
-  headers.set("Content-Type", "video/mp4");
+  headers.set("Content-Type", type === "audio" ? "audio/mp4" : "video/mp4");
   headers.set("Cache-Control", "no-store");
   headers.set("Accept-Ranges", "none");
   return new Response(body, { status: 200, headers });
