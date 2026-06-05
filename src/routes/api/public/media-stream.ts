@@ -22,6 +22,17 @@ function isSupportedSource(url: string) {
   );
 }
 
+function pickRefererForSource(url: string): string {
+  const u = url.toLowerCase();
+  if (u.includes("tiktok.com")) return "https://www.tiktok.com/";
+  if (u.includes("youtube.com") || u.includes("youtu.be")) return "https://www.youtube.com/";
+  if (u.includes("instagram.com")) return "https://www.instagram.com/";
+  if (u.includes("facebook.com")) return "https://www.facebook.com/";
+  if (u.includes("twitter.com") || u.includes("x.com")) return "https://twitter.com/";
+  if (u.includes("vimeo.com")) return "https://vimeo.com/";
+  return "https://www.google.com/";
+}
+
 async function readProxySetting() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -63,6 +74,7 @@ async function handle(request: Request): Promise<Response> {
 
   const { spawn } = await import("node:child_process");
   const proxy = await readProxySetting();
+  const referer = pickRefererForSource(target);
   const format =
     type === "audio" ? "bestaudio[ext=m4a]/bestaudio/best[ext=mp4]/best" : "best[ext=mp4]/best";
   const args = [
@@ -72,8 +84,11 @@ async function handle(request: Request): Promise<Response> {
     "--no-check-certificates",
     "--socket-timeout",
     "30",
+    "--retries",
+    "3",
+    "--geo-bypass",
     "--add-header",
-    "referer:https://www.tiktok.com/",
+    `referer:${referer}`,
     "--add-header",
     "user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "-o",
