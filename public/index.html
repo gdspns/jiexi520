@@ -749,7 +749,11 @@
         }
 
         function copyToClipboard(text) {
-            const ta = document.createElement("textarea"); ta.value = text;
+            const toAbs = (s) => (typeof s === 'string' && s.startsWith('/')) ? (window.location.origin + s) : s;
+            const value = (typeof text === 'string' && text.includes('\n'))
+                ? text.split('\n').map(toAbs).join('\n')
+                : toAbs(text);
+            const ta = document.createElement("textarea"); ta.value = value;
             document.body.appendChild(ta); ta.select();
             try { document.execCommand('copy'); showToast('已复制到剪贴板', 'success'); } 
             catch(e) { showToast('复制失败', 'error'); }
