@@ -55,10 +55,9 @@ export const setBanned = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ userId: z.string().uuid(), banned: z.boolean() }).parse(input))
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    await assertAdmin(supabase, userId);
+    const { userId } = context;
+    const supabaseAdmin = await assertAdmin(userId);
     if (data.userId === userId) throw new Error("不能封禁自己");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const { error: aErr } = await supabaseAdmin.auth.admin.updateUserById(data.userId, {
       ban_duration: data.banned ? "876000h" : "none",
@@ -78,10 +77,9 @@ export const deleteUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ userId: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    await assertAdmin(supabase, userId);
+    const { userId } = context;
+    const supabaseAdmin = await assertAdmin(userId);
     if (data.userId === userId) throw new Error("不能删除自己");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin.auth.admin.deleteUser(data.userId);
     if (error) throw new Error(error.message);
     return { ok: true };
@@ -93,14 +91,22 @@ export const adjustCredits = createServerFn({ method: "POST" })
     z.object({ userId: z.string().uuid(), delta: z.number().int() }).parse(input),
   )
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    await assertAdmin(supabase, userId);
-    const { data: result, error } = await supabase.rpc("admin_adjust_credits", {
-      _user_id: data.userId,
-      _delta: data.delta,
-    });
+    const { userId } = context;
+    const supabaseAdmin = await assertAdmin(userId);
+    const { data: current, error: readError } = await supabaseAdmin
+      .from("profiles")
+      .select("credits")
+      .eq("id", data.userId)
+      .maybeSingle();
+    if (readError) throw new Error(readError.message);
+    if (!current) throw new Error("用户不存在");
+    const nextCredits = Math.max(0, Number(current.credits ?? 0) + data.delta);
+    const { error } = await supabaseAdmin
+      .from("profiles")
+      .update({ credits: nextCredits })
+      .eq("id", data.userId);
     if (error) throw new Error(error.message);
-    return { credits: result as number };
+    return { credits: nextCredits };
   });
 
 export const getSignupBonus = createServerFn({ method: "GET" })
