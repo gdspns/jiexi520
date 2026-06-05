@@ -63,8 +63,11 @@ async function handle(request: Request): Promise<Response> {
 
   const { spawn } = await import("node:child_process");
   const proxy = await readProxySetting();
+  const format =
+    type === "audio" ? "bestaudio[ext=m4a]/bestaudio/best[ext=mp4]/best" : "best[ext=mp4]/best";
   const args = [
-    target,
+    "-f",
+    format,
     "--no-warnings",
     "--no-check-certificates",
     "--socket-timeout",
@@ -75,16 +78,9 @@ async function handle(request: Request): Promise<Response> {
     "user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "-o",
     "-",
+    target,
   ];
-  // TikTok usually serves a progressive mp4 with the audio track included.
-  // Using a progressive mp4 keeps playback/download compatible without ffmpeg.
-  args.splice(
-    1,
-    0,
-    "-f",
-    type === "audio" ? "bestaudio[ext=m4a]/bestaudio/best[ext=mp4]/best" : "best[ext=mp4]/best",
-  );
-  if (proxy) args.push("--proxy", proxy);
+  if (proxy) args.splice(-1, 0, "--proxy", proxy);
 
   const child = spawn(configuredPath, args, {
     stdio: ["ignore", "pipe", "pipe"],
