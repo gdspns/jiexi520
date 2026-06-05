@@ -188,9 +188,20 @@ async function parseOverseas(url: string, proxy: string) {
         },
       ]
     : [{ name: "default", extra: ["--add-header", `user-agent:${UA_DESKTOP}`] }];
+  const cookieArgSets = isTikTok ? await buildTikTokCookieArgSets() : [];
+  const attempts = [
+    ...strategies.map((strategy) => ({ name: strategy.name, extra: strategy.extra })),
+    ...cookieArgSets.flatMap((cookieSet) =>
+      strategies.map((strategy) => ({
+        name: `${strategy.name}+${cookieSet.name}`,
+        extra: [...strategy.extra, ...cookieSet.extra],
+      })),
+    ),
+  ];
 
   const errors: string[] = [];
-  for (const strat of strategies) {
+  let needsCookies = false;
+  for (const strat of attempts) {
     const args = [url, ...baseArgs, ...strat.extra];
     if (proxy) args.push("--proxy", proxy);
     try {
@@ -226,12 +237,18 @@ async function parseOverseas(url: string, proxy: string) {
       };
     } catch (e: any) {
       const raw = e?.stderr || e?.message || String(e);
-      const safe = proxy ? String(raw).replaceAll(proxy, "[proxy]") : String(raw);
+      const safe = redactSensitive(raw, proxy);
+      if (isLoginCookieRequired(safe)) needsCookies = true;
       console.error(`[api/parse] strategy ${strat.name} failed:`, safe.slice(0, 800));
       errors.push(`[${strat.name}] ${safe.slice(0, 400)}`);
     }
   }
-  throw new Error("海外解析失败（已尝试 " + strategies.length + " 种策略）：" + errors.join(" || ").slice(0, 1500));
+  if (needsCookies && cookieArgSets.length === 0) {
+    throw new Error(
+      "该 TikTok 视频需要登录 Cookie 才能解析（不是代码逻辑问题）。请在 Zeabur 环境变量添加 TIKTOK_COOKIES（Netscape cookies.txt 内容）或 TIKTOK_COOKIE_HEADER 后重启。",
+    );
+  }
+  throw new Error("海外解析失败（已尝试 " + attempts.length + " 种策略）：" + errors.join(" || ").slice(0, 1500));
 }
 
 async function handle(request: Request): Promise<Response> {
