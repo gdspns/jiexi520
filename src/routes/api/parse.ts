@@ -42,6 +42,10 @@ function determinePlatform(url: string): string {
   return "通用";
 }
 
+function streamUrl(url: string, type: "audio" | "video") {
+  return `/api/public/media-stream?type=${type}&url=${encodeURIComponent(url)}`;
+}
+
 async function parseDomestic(url: string, endpoint: string, token: string) {
   const form = new FormData();
   form.append("token", token);
@@ -112,17 +116,14 @@ async function parseOverseas(url: string, proxy: string) {
     });
 
     const info: any = JSON.parse(stdout);
-    const audioFmt =
-      (info.formats || []).find(
-        (f: any) => f.acodec && f.acodec !== "none" && (!f.vcodec || f.vcodec === "none"),
-      ) || null;
-    const music = audioFmt?.url || info.url || info.webpage_url;
-    if (!music) throw new Error("无可用音频流");
     return {
       title: info.title || "提取的文件",
       cover: info.thumbnail || "",
-      music_url: music,
-      video_url: info.url || "",
+      // TikTok/overseas CDN links are often signed to the server request and
+      // cannot be played by the browser directly. Use a same-origin stream that
+      // regenerates and pipes the media with yt-dlp for playback/download.
+      music_url: streamUrl(url, "audio"),
+      video_url: streamUrl(url, "video"),
       original_url: url,
       platform: determinePlatform(url),
     };
