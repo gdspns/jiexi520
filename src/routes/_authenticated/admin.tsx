@@ -427,7 +427,7 @@ function AdminPage() {
           <div className="flex items-center justify-between mb-2">
             <div>
               <h2 className="text-base font-bold">充值商品管理</h2>
-              <p className="text-xs text-slate-400 mt-1">价格与折扣价以分(cent)为单位。例如 990 = 9.90 元。次数为该商品支付成功后赠送的解析次数。</p>
+              <p className="text-xs text-slate-400 mt-1">价格与折扣价以元为单位，支持两位小数（如 9.90）。次数为该商品支付成功后赠送的解析次数。</p>
             </div>
             <button onClick={addNewProduct} className="px-3 py-1.5 rounded-md bg-pink-600 hover:bg-pink-500 text-white text-xs font-semibold">+ 新增商品</button>
           </div>
@@ -439,8 +439,8 @@ function AdminPage() {
                 <thead className="bg-slate-900 text-slate-400">
                   <tr>
                     <th className="text-left px-3 py-2">名称</th>
-                    <th className="text-left px-3 py-2 w-24">原价(分)</th>
-                    <th className="text-left px-3 py-2 w-24">折扣价(分)</th>
+                    <th className="text-left px-3 py-2 w-24">原价(元)</th>
+                    <th className="text-left px-3 py-2 w-24">折扣价(元)</th>
                     <th className="text-left px-3 py-2 w-20">次数</th>
                     <th className="text-left px-3 py-2 w-20">排序</th>
                     <th className="text-left px-3 py-2 w-16">启用</th>
@@ -451,13 +451,25 @@ function AdminPage() {
                   {products.map((p, idx) => (
                     <tr key={p.id ?? `new-${idx}`} className="border-t border-slate-800">
                       <td className="px-3 py-2"><input value={p.name} onChange={(e) => setProducts((arr) => arr.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-100" /></td>
-                      <td className="px-3 py-2"><input type="number" value={p.price} onChange={(e) => setProducts((arr) => arr.map((x, i) => i === idx ? { ...x, price: parseInt(e.target.value) || 0 } : x))} className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-100 font-mono" /></td>
-                      <td className="px-3 py-2"><input type="number" value={p.discount_price ?? ""} placeholder="可空" onChange={(e) => setProducts((arr) => arr.map((x, i) => i === idx ? { ...x, discount_price: e.target.value === "" ? null : (parseInt(e.target.value) || 0) } : x))} className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-100 font-mono" /></td>
+                      <td className="px-3 py-2"><input type="number" step="0.01" min="0" value={(p.price / 100).toString()} onChange={(e) => setProducts((arr) => arr.map((x, i) => i === idx ? { ...x, price: Math.round((parseFloat(e.target.value) || 0) * 100) } : x))} className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-100 font-mono" /></td>
+                      <td className="px-3 py-2"><input type="number" step="0.01" min="0" value={p.discount_price == null ? "" : (p.discount_price / 100).toString()} placeholder="可空" onChange={(e) => setProducts((arr) => arr.map((x, i) => i === idx ? { ...x, discount_price: e.target.value === "" ? null : Math.round((parseFloat(e.target.value) || 0) * 100) } : x))} className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-100 font-mono" /></td>
                       <td className="px-3 py-2"><input type="number" value={p.credits} onChange={(e) => setProducts((arr) => arr.map((x, i) => i === idx ? { ...x, credits: parseInt(e.target.value) || 0 } : x))} className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-100 font-mono" /></td>
                       <td className="px-3 py-2"><input type="number" value={p.sort_order} onChange={(e) => setProducts((arr) => arr.map((x, i) => i === idx ? { ...x, sort_order: parseInt(e.target.value) || 0 } : x))} className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-100 font-mono" /></td>
                       <td className="px-3 py-2 text-center"><input type="checkbox" checked={p.enabled} onChange={(e) => setProducts((arr) => arr.map((x, i) => i === idx ? { ...x, enabled: e.target.checked } : x))} /></td>
                       <td className="px-3 py-2 text-right space-x-2 whitespace-nowrap">
-                        <button onClick={() => onSaveProduct(p)} className="px-3 py-1 rounded bg-green-600/80 hover:bg-green-600 text-white text-xs">保存</button>
+                        <button
+                          onClick={() => onSaveProduct(p, idx)}
+                          disabled={savingProdIdx === idx}
+                          className={`px-3 py-1 rounded text-white text-xs transition-colors ${
+                            savedProdIdx === idx
+                              ? "bg-emerald-500"
+                              : savingProdIdx === idx
+                                ? "bg-slate-600 cursor-wait"
+                                : "bg-green-600/80 hover:bg-green-600"
+                          }`}
+                        >
+                          {savingProdIdx === idx ? "保存中..." : savedProdIdx === idx ? "✓ 已保存" : "保存"}
+                        </button>
                         <button onClick={() => onDeleteProduct(p.id)} className="px-3 py-1 rounded bg-red-600/80 hover:bg-red-600 text-white text-xs">删除</button>
                       </td>
                     </tr>
