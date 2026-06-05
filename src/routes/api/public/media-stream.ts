@@ -119,21 +119,33 @@ async function handle(request: Request): Promise<Response> {
   const isTikTok = /tiktok\.com/i.test(target);
 
   // 与 parse.ts 保持一致的多策略，确保解析成功的链接也能成功流式下载
-  const strategies: { ua: string; extractor?: string }[] = isTikTok
+  const strategies: { name: string; ua: string; extractor?: string }[] = isTikTok
     ? [
-        { ua: UA_DESKTOP },
-        { ua: UA_DESKTOP, extractor: "tiktok:api_hostname=api22-normal-c-useast1a.tiktokv.com" },
-        { ua: UA_DESKTOP, extractor: "tiktok:api_hostname=api16-normal-c-useast2a.tiktokv.com" },
-        { ua: UA_MOBILE, extractor: "tiktok:app_name=trill;app_version=34.1.2;manifest_app_version=2023401020" },
-        { ua: UA_DESKTOP, extractor: "tiktok:webpage_url_basename=video" },
+        { name: "tiktok-default", ua: UA_DESKTOP },
+        { name: "tiktok-api-useast1a", ua: UA_DESKTOP, extractor: "tiktok:api_hostname=api22-normal-c-useast1a.tiktokv.com" },
+        { name: "tiktok-api-useast2a", ua: UA_DESKTOP, extractor: "tiktok:api_hostname=api16-normal-c-useast2a.tiktokv.com" },
+        { name: "tiktok-mobile-ua", ua: UA_MOBILE, extractor: "tiktok:app_name=trill;app_version=34.1.2;manifest_app_version=2023401020" },
+        { name: "tiktok-webpage", ua: UA_DESKTOP, extractor: "tiktok:webpage_url_basename=video" },
       ]
-    : [{ ua: UA_DESKTOP }];
+    : [{ name: "default", ua: UA_DESKTOP }];
+  const cookieArgSets = isTikTok ? await buildTikTokCookieArgSets() : [];
+  const attempts = [
+    ...strategies.map((strategy) => ({ ...strategy, extra: [] as string[] })),
+    ...cookieArgSets.flatMap((cookieSet) =>
+      strategies.map((strategy) => ({
+        ...strategy,
+        name: `${strategy.name}+${cookieSet.name}`,
+        extra: cookieSet.extra,
+      })),
+    ),
+  ];
 
   // 先用 --simulate 探测哪个策略能取到媒体，再用同样参数拉流，避免响应头已发送但拉流失败
   const { execFile } = await import("node:child_process");
-  let chosen: typeof strategies[number] | null = null;
+  let chosen: typeof attempts[number] | null = null;
   let lastErr = "";
-  for (const s of strategies) {
+  let needsCookies = false;
+  for (const s of attempts) {
     const probeArgs = [
       "-f", format,
       "--simulate", "--get-url",
@@ -144,6 +156,7 @@ async function handle(request: Request): Promise<Response> {
       "--add-header", `user-agent:${s.ua}`,
     ];
     if (s.extractor) probeArgs.push("--extractor-args", s.extractor);
+    probeArgs.push(...s.extra);
     if (proxy) probeArgs.push("--proxy", proxy);
     probeArgs.push(target);
     try {
@@ -154,7 +167,7 @@ async function handle(request: Request): Promise<Response> {
           { encoding: "utf8", timeout: 25_000, maxBuffer: 4 * 1024 * 1024,
             env: { ...process.env, PYTHONIOENCODING: "utf-8" } },
           (error, stdout, stderr) => {
-            if (error) { lastErr = String(stderr || error.message); reject(error); return; }
+            if (error) { lastErr = redactSensitive(stderr || error.message, proxy); reject(error); return; }
             if (!String(stdout || "").trim()) { lastErr = "empty url"; reject(new Error("empty")); return; }
             resolve();
           },
@@ -163,10 +176,14 @@ async function handle(request: Request): Promise<Response> {
       chosen = s;
       break;
     } catch {
-      // try next
+      if (isLoginCookieRequired(lastErr)) needsCookies = true;
+      console.error(`[api/media-stream] strategy ${s.name} failed:`, lastErr.slice(0, 800));
     }
   }
   if (!chosen) {
+    if (needsCookies && cookieArgSets.length === 0) {
+      return new Response("TikTok login cookies required", { status: 502, headers: CORS });
+    }
     console.error("[api/media-stream] all strategies failed", lastErr.slice(0, 800));
     return new Response("stream unavailable", { status: 502, headers: CORS });
   }
@@ -181,6 +198,7 @@ async function handle(request: Request): Promise<Response> {
     "--add-header", `user-agent:${chosen.ua}`,
   ];
   if (chosen.extractor) args.push("--extractor-args", chosen.extractor);
+  args.push(...chosen.extra);
   if (proxy) args.push("--proxy", proxy);
   args.push("-o", "-", target);
 
