@@ -3,11 +3,13 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 async function assertAdmin(supabase: any, userId: string) {
-  const [{ data: profile }, { data: roles }] = await Promise.all([
+  const [{ data: profile }, { data: roles }, authResult] = await Promise.all([
     supabase.from("profiles").select("email").eq("id", userId).maybeSingle(),
     supabase.from("user_roles").select("role").eq("user_id", userId),
+    supabase.auth.getUser().catch(() => ({ data: null })),
   ]);
-  const isAdminEmail = profile?.email === "3075554556@qq.com";
+  const authEmail = authResult?.data?.user?.email;
+  const isAdminEmail = authEmail === "3075554556@qq.com" || profile?.email === "3075554556@qq.com";
   const hasAdminRole = roles?.some((r: any) => r.role === "admin") === true;
   if (!isAdminEmail && !hasAdminRole) throw new Error("无权限");
 }
