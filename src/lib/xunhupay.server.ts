@@ -83,15 +83,21 @@ export async function createXunhupayOrder(input: CreateOrderInput): Promise<Crea
     type: "WAP",
     wap_url: returnUrl,
     wap_name: title.slice(0, 16),
+    payment: channel === "wechat" ? "wechat" : "alipay",
   };
-  if (clientIp) params.attach = clientIp;
+  // attach 是商户自定义透传字段，留空避免干扰签名
+  void clientIp;
 
   const hash = sign(params, creds.appsecret);
   const body = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => body.append(k, String(v)));
   body.append("hash", hash);
 
-  const res = await fetch(cfg.api_endpoint || "https://api.xunhupay.com/payment/do.html", {
+  const defaultEndpoint =
+    channel === "alipay"
+      ? "https://api.xunhupay.com/payment/do.html"
+      : "https://api.xunhupay.com/payment/do.html";
+  const res = await fetch(cfg.api_endpoint || defaultEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
@@ -104,7 +110,11 @@ export async function createXunhupayOrder(input: CreateOrderInput): Promise<Crea
     throw new Error("虎皮椒响应格式异常: " + text.slice(0, 200));
   }
   if (data.errcode !== 0) {
-    throw new Error(`虎皮椒下单失败: ${data.errmsg || JSON.stringify(data)}`);
+    const detail = data.errmsg || data.hint || JSON.stringify(data);
+    throw new Error(
+      `虎皮椒下单失败(${channel}): ${detail}` +
+        ` [appid=${creds.appid?.slice(0, 4)}***, total_fee=${totalFee}, order=${orderNo}]`
+    );
   }
   return {
     qr_url: data.url_qrcode || data.url || null,
