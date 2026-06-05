@@ -357,6 +357,110 @@ function AdminPage() {
           </div>
         </section>
 
+        <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+          <h2 className="text-base font-bold mb-1">支付配置（虎皮椒）</h2>
+          <p className="text-xs text-slate-400 mb-3">填写虎皮椒商户号 (appid) 与密钥 (appsecret)，开启对应渠道后用户即可使用扫码 / H5 跳转支付。</p>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="rounded-lg border border-slate-800 p-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-bold text-green-300">微信支付</h3>
+                <label className="flex items-center gap-2 text-xs text-slate-300">
+                  <input type="checkbox" checked={payCfg.wechat_enabled} onChange={(e) => setPayCfg({ ...payCfg, wechat_enabled: e.target.checked })} />
+                  启用
+                </label>
+              </div>
+              <label className="block text-xs text-slate-400 mb-1">商户号 (appid)</label>
+              <input value={payCfg.wechat_appid} onChange={(e) => setPayCfg({ ...payCfg, wechat_appid: e.target.value })}
+                placeholder="微信 appid" className="w-full mb-2 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500" />
+              <label className="block text-xs text-slate-400 mb-1">密钥 (appsecret)</label>
+              <div className="flex gap-2">
+                <input type={showWxSecret ? "text" : "password"} value={payCfg.wechat_appsecret} onChange={(e) => setPayCfg({ ...payCfg, wechat_appsecret: e.target.value })}
+                  placeholder="微信 appsecret" className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500" />
+                <button type="button" onClick={() => setShowWxSecret((s) => !s)} className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs">{showWxSecret ? "隐藏" : "显示"}</button>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-800 p-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-bold text-blue-300">支付宝</h3>
+                <label className="flex items-center gap-2 text-xs text-slate-300">
+                  <input type="checkbox" checked={payCfg.alipay_enabled} onChange={(e) => setPayCfg({ ...payCfg, alipay_enabled: e.target.checked })} />
+                  启用
+                </label>
+              </div>
+              <label className="block text-xs text-slate-400 mb-1">商户号 (appid)</label>
+              <input value={payCfg.alipay_appid} onChange={(e) => setPayCfg({ ...payCfg, alipay_appid: e.target.value })}
+                placeholder="支付宝 appid" className="w-full mb-2 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500" />
+              <label className="block text-xs text-slate-400 mb-1">密钥 (appsecret)</label>
+              <div className="flex gap-2">
+                <input type={showAliSecret ? "text" : "password"} value={payCfg.alipay_appsecret} onChange={(e) => setPayCfg({ ...payCfg, alipay_appsecret: e.target.value })}
+                  placeholder="支付宝 appsecret" className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500" />
+                <button type="button" onClick={() => setShowAliSecret((s) => !s)} className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs">{showAliSecret ? "隐藏" : "显示"}</button>
+              </div>
+            </div>
+          </div>
+          <div className="mt-3">
+            <label className="block text-xs text-slate-400 mb-1">虎皮椒接口地址</label>
+            <input value={payCfg.api_endpoint} onChange={(e) => setPayCfg({ ...payCfg, api_endpoint: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500" />
+            <p className="text-[11px] text-slate-500 mt-1">默认 https://api.xunhupay.com/payment/do.html ，无特殊需求请勿修改。回调地址会自动设为 /api/public/xunhupay-notify。</p>
+          </div>
+          <div className="mt-4">
+            <button onClick={onSavePay} disabled={savingPay}
+              className="px-4 py-2 rounded-lg bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white text-sm font-semibold disabled:opacity-50">
+              {savingPay ? "保存中..." : "保存支付配置"}
+            </button>
+          </div>
+        </section>
+
+        <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <h2 className="text-base font-bold">充值商品管理</h2>
+              <p className="text-xs text-slate-400 mt-1">价格与折扣价以分(cent)为单位。例如 990 = 9.90 元。次数为该商品支付成功后赠送的解析次数。</p>
+            </div>
+            <button onClick={addNewProduct} className="px-3 py-1.5 rounded-md bg-pink-600 hover:bg-pink-500 text-white text-xs font-semibold">+ 新增商品</button>
+          </div>
+          {loadingProds ? (
+            <p className="text-slate-400 text-sm">加载中...</p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-slate-800">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-900 text-slate-400">
+                  <tr>
+                    <th className="text-left px-3 py-2">名称</th>
+                    <th className="text-left px-3 py-2 w-24">原价(分)</th>
+                    <th className="text-left px-3 py-2 w-24">折扣价(分)</th>
+                    <th className="text-left px-3 py-2 w-20">次数</th>
+                    <th className="text-left px-3 py-2 w-20">排序</th>
+                    <th className="text-left px-3 py-2 w-16">启用</th>
+                    <th className="text-right px-3 py-2 w-44">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {products.map((p, idx) => (
+                    <tr key={p.id ?? `new-${idx}`} className="border-t border-slate-800">
+                      <td className="px-3 py-2"><input value={p.name} onChange={(e) => setProducts((arr) => arr.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-100" /></td>
+                      <td className="px-3 py-2"><input type="number" value={p.price} onChange={(e) => setProducts((arr) => arr.map((x, i) => i === idx ? { ...x, price: parseInt(e.target.value) || 0 } : x))} className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-100 font-mono" /></td>
+                      <td className="px-3 py-2"><input type="number" value={p.discount_price ?? ""} placeholder="可空" onChange={(e) => setProducts((arr) => arr.map((x, i) => i === idx ? { ...x, discount_price: e.target.value === "" ? null : (parseInt(e.target.value) || 0) } : x))} className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-100 font-mono" /></td>
+                      <td className="px-3 py-2"><input type="number" value={p.credits} onChange={(e) => setProducts((arr) => arr.map((x, i) => i === idx ? { ...x, credits: parseInt(e.target.value) || 0 } : x))} className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-100 font-mono" /></td>
+                      <td className="px-3 py-2"><input type="number" value={p.sort_order} onChange={(e) => setProducts((arr) => arr.map((x, i) => i === idx ? { ...x, sort_order: parseInt(e.target.value) || 0 } : x))} className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-100 font-mono" /></td>
+                      <td className="px-3 py-2 text-center"><input type="checkbox" checked={p.enabled} onChange={(e) => setProducts((arr) => arr.map((x, i) => i === idx ? { ...x, enabled: e.target.checked } : x))} /></td>
+                      <td className="px-3 py-2 text-right space-x-2 whitespace-nowrap">
+                        <button onClick={() => onSaveProduct(p)} className="px-3 py-1 rounded bg-green-600/80 hover:bg-green-600 text-white text-xs">保存</button>
+                        <button onClick={() => onDeleteProduct(p.id)} className="px-3 py-1 rounded bg-red-600/80 hover:bg-red-600 text-white text-xs">删除</button>
+                      </td>
+                    </tr>
+                  ))}
+                  {products.length === 0 && (
+                    <tr><td colSpan={7} className="text-center text-slate-500 py-6">暂无商品，点击右上角"新增商品"添加</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
         {isLoading && <p className="text-slate-400">加载中...</p>}
         {error && <p className="text-red-400">加载失败：{(error as Error).message}</p>}
         {data && (
