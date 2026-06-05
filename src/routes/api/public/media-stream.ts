@@ -38,6 +38,14 @@ async function handle(request: Request): Promise<Response> {
     return new Response("yt-dlp is unavailable", { status: 500, headers: CORS });
   }
 
+  if (request.method === "HEAD") {
+    const headers = new Headers(CORS);
+    headers.set("Content-Type", "video/mp4");
+    headers.set("Cache-Control", "no-store");
+    headers.set("Accept-Ranges", "none");
+    return new Response(null, { status: 200, headers });
+  }
+
   const { spawn } = await import("node:child_process");
   const args = [
     target,
@@ -85,7 +93,6 @@ async function handle(request: Request): Promise<Response> {
   headers.set("Content-Type", "video/mp4");
   headers.set("Cache-Control", "no-store");
   headers.set("Accept-Ranges", "none");
-  if (request.method === "HEAD") return new Response(null, { status: 200, headers });
   return new Response(body, { status: 200, headers });
 }
 
