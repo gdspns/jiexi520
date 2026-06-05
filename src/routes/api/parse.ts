@@ -145,17 +145,9 @@ async function handle(request: Request): Promise<Response> {
   }
 
   // 解析成功后扣除积分（管理员不扣）
-  // 使用以用户身份调用的 supabase client 走 RPC，保证 auth.uid() 正确
-  const { createClient } = await import("@supabase/supabase-js");
-  const userSb = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_PUBLISHABLE_KEY!,
-    {
-      global: { headers: { Authorization: `Bearer ${accessToken}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    },
-  );
-  const { data: remaining, error: consumeErr } = await userSb.rpc("consume_credit");
+  const { data: remaining, error: consumeErr } = await supabaseAdmin.rpc("consume_credit_for_user", {
+    _user_id: userData.user.id,
+  });
   if (consumeErr) {
     return json({ error: consumeErr.message || "扣减积分失败" }, 402);
   }
