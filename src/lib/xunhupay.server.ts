@@ -73,6 +73,7 @@ export async function createXunhupayOrder(input: CreateOrderInput): Promise<Crea
   const params: Record<string, string | number> = {
     version: "1.1",
     appid: creds.appid,
+    plugins: channel,
     trade_order_id: orderNo,
     total_fee: totalFee,
     title: title.slice(0, 32),
@@ -80,18 +81,12 @@ export async function createXunhupayOrder(input: CreateOrderInput): Promise<Crea
     notify_url: notifyUrl,
     return_url: returnUrl,
     nonce_str: Math.random().toString(36).slice(2, 12),
-    type: "WAP",
-    wap_url: returnUrl,
-    wap_name: title.slice(0, 16),
-    payment: channel === "wechat" ? "wechat" : "alipay",
   };
   // attach 是商户自定义透传字段，留空避免干扰签名
   void clientIp;
 
   const hash = sign(params, creds.appsecret);
-  const body = new URLSearchParams();
-  Object.entries(params).forEach(([k, v]) => body.append(k, String(v)));
-  body.append("hash", hash);
+  const body = JSON.stringify({ ...params, hash });
 
   const defaultEndpoint =
     channel === "alipay"
@@ -99,8 +94,11 @@ export async function createXunhupayOrder(input: CreateOrderInput): Promise<Crea
       : "https://api.xunhupay.com/payment/do.html";
   const res = await fetch(cfg.api_endpoint || defaultEndpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
+    headers: {
+      "Content-Type": "application/json",
+      Referer: new URL(returnUrl).origin,
+    },
+    body,
   });
   const text = await res.text();
   let data: any;
