@@ -8,7 +8,7 @@ async function assertAdmin(supabase: any, userId: string) {
     supabase.from("user_roles").select("role").eq("user_id", userId),
   ]);
   const isAdminEmail = profile?.email === "3075554556@qq.com";
-  const hasAdminRole = roles?.some((r) => r.role === "admin") === true;
+  const hasAdminRole = roles?.some((r: any) => r.role === "admin") === true;
   if (!isAdminEmail && !hasAdminRole) throw new Error("无权限");
 }
 
@@ -53,16 +53,10 @@ export const setBanned = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ userId: z.string().uuid(), banned: z.boolean() }).parse(input))
   .handler(async ({ data, context }) => {
-    const { userId } = context;
-    const supabaseAdmin = await assertAdmin(userId);
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
     if (data.userId === userId) throw new Error("不能封禁自己");
-
-    const { error: aErr } = await supabaseAdmin.auth.admin.updateUserById(data.userId, {
-      ban_duration: data.banned ? "876000h" : "none",
-    });
-    if (aErr) throw new Error(aErr.message);
-
-    const { error: pErr } = await supabaseAdmin
+    const { error: pErr } = await supabase
       .from("profiles")
       .update({ banned: data.banned })
       .eq("id", data.userId);
@@ -75,12 +69,10 @@ export const deleteUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ userId: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
-    const { userId } = context;
-    const supabaseAdmin = await assertAdmin(userId);
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
     if (data.userId === userId) throw new Error("不能删除自己");
-    const { error } = await supabaseAdmin.auth.admin.deleteUser(data.userId);
-    if (error) throw new Error(error.message);
-    return { ok: true };
+    throw new Error("当前部署未配置私密管理密钥，不能删除登录账号；请先使用封禁功能");
   });
 
 export const adjustCredits = createServerFn({ method: "POST" })
