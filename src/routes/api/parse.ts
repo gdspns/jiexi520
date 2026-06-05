@@ -46,6 +46,17 @@ function streamUrl(url: string, type: "audio" | "video") {
   return `/api/public/media-stream?type=${type}&url=${encodeURIComponent(url)}`;
 }
 
+function pickRefererForSource(url: string): string {
+  const u = url.toLowerCase();
+  if (u.includes("tiktok.com")) return "https://www.tiktok.com/";
+  if (u.includes("youtube.com") || u.includes("youtu.be")) return "https://www.youtube.com/";
+  if (u.includes("instagram.com")) return "https://www.instagram.com/";
+  if (u.includes("facebook.com")) return "https://www.facebook.com/";
+  if (u.includes("twitter.com") || u.includes("x.com")) return "https://twitter.com/";
+  if (u.includes("vimeo.com")) return "https://vimeo.com/";
+  return "https://www.google.com/";
+}
+
 async function parseDomestic(url: string, endpoint: string, token: string) {
   const form = new FormData();
   form.append("token", token);
@@ -80,6 +91,7 @@ async function parseOverseas(url: string, proxy: string) {
 
   try {
     const { execFile } = await import("node:child_process");
+    const referer = pickRefererForSource(url);
     const args = [
       url,
       "--dump-single-json",
@@ -88,8 +100,11 @@ async function parseOverseas(url: string, proxy: string) {
       "--prefer-free-formats",
       "--socket-timeout",
       "30",
+      "--retries",
+      "3",
+      "--geo-bypass",
       "--add-header",
-      "referer:https://www.tiktok.com/",
+      `referer:${referer}`,
       "--add-header",
       "user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     ];
