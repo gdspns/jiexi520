@@ -39,12 +39,24 @@ function isLoginCookieRequired(message: string): boolean {
   );
 }
 
-async function buildTikTokCookieArgSets(): Promise<{ name: string; extra: string[] }[]> {
+function platformKey(url: string): "TIKTOK" | "YOUTUBE" | "INSTAGRAM" | "FACEBOOK" | "TWITTER" | "VIMEO" | "" {
+  const u = url.toLowerCase();
+  if (u.includes("tiktok.com")) return "TIKTOK";
+  if (u.includes("youtube.com") || u.includes("youtu.be")) return "YOUTUBE";
+  if (u.includes("instagram.com")) return "INSTAGRAM";
+  if (u.includes("facebook.com") || u.includes("fb.watch")) return "FACEBOOK";
+  if (u.includes("twitter.com") || u.includes("x.com")) return "TWITTER";
+  if (u.includes("vimeo.com")) return "VIMEO";
+  return "";
+}
+
+async function buildCookieArgSets(prefix: string): Promise<{ name: string; extra: string[] }[]> {
   const sets: { name: string; extra: string[] }[] = [];
-  const cookieFile = process.env.TIKTOK_COOKIES_FILE || process.env.YTDLP_COOKIES_FILE;
-  const cookieHeader = process.env.TIKTOK_COOKIE_HEADER || process.env.TIKTOK_COOKIES_HEADER;
-  const cookieText = process.env.TIKTOK_COOKIES;
-  const cookieB64 = process.env.TIKTOK_COOKIES_B64;
+  if (!prefix) return sets;
+  const cookieFile = process.env[`${prefix}_COOKIES_FILE`] || process.env.YTDLP_COOKIES_FILE;
+  const cookieHeader = process.env[`${prefix}_COOKIE_HEADER`] || process.env[`${prefix}_COOKIES_HEADER`];
+  const cookieText = process.env[`${prefix}_COOKIES`];
+  const cookieB64 = process.env[`${prefix}_COOKIES_B64`];
 
   if (cookieFile) sets.push({ name: "cookies-file", extra: ["--cookies", cookieFile] });
   if (cookieHeader) sets.push({ name: "cookie-header", extra: ["--add-header", `cookie:${cookieHeader}`] });
@@ -53,7 +65,7 @@ async function buildTikTokCookieArgSets(): Promise<{ name: string; extra: string
       ? Buffer.from(cookieB64, "base64").toString("utf8")
       : String(cookieText || "").replace(/\\n/g, "\n");
     const fs = await import("node:fs/promises");
-    const path = "/tmp/tiktok-cookies.txt";
+    const path = `/tmp/${prefix.toLowerCase()}-cookies.txt`;
     await fs.writeFile(path, content, { mode: 0o600 });
     sets.push({ name: "cookies-secret", extra: ["--cookies", path] });
   }
@@ -63,9 +75,56 @@ async function buildTikTokCookieArgSets(): Promise<{ name: string; extra: string
 function redactSensitive(input: unknown, proxy = "") {
   let text = String(input || "");
   if (proxy) text = text.replaceAll(proxy, "[proxy]");
-  const cookieHeader = process.env.TIKTOK_COOKIE_HEADER || process.env.TIKTOK_COOKIES_HEADER;
-  if (cookieHeader) text = text.replaceAll(cookieHeader, "[tiktok-cookie]");
+  for (const p of ["TIKTOK", "YOUTUBE", "INSTAGRAM", "FACEBOOK", "TWITTER", "VIMEO"]) {
+    const h = process.env[`${p}_COOKIE_HEADER`] || process.env[`${p}_COOKIES_HEADER`];
+    if (h) text = text.replaceAll(h, `[${p.toLowerCase()}-cookie]`);
+  }
   return text;
+}
+
+function buildPlatformStrategies(
+  platform: ReturnType<typeof platformKey>,
+  UA_DESKTOP: string,
+  UA_MOBILE: string,
+): { name: string; ua: string; extractor?: string }[] {
+  if (platform === "TIKTOK") {
+    return [
+      { name: "tiktok-default", ua: UA_DESKTOP },
+      { name: "tiktok-api-useast1a", ua: UA_DESKTOP, extractor: "tiktok:api_hostname=api22-normal-c-useast1a.tiktokv.com" },
+      { name: "tiktok-api-useast2a", ua: UA_DESKTOP, extractor: "tiktok:api_hostname=api16-normal-c-useast2a.tiktokv.com" },
+      { name: "tiktok-mobile-ua", ua: UA_MOBILE, extractor: "tiktok:app_name=trill;app_version=34.1.2;manifest_app_version=2023401020" },
+      { name: "tiktok-webpage", ua: UA_DESKTOP, extractor: "tiktok:webpage_url_basename=video" },
+    ];
+  }
+  if (platform === "YOUTUBE") {
+    return [
+      { name: "yt-default", ua: UA_DESKTOP },
+      { name: "yt-android", ua: UA_MOBILE, extractor: "youtube:player_client=android" },
+      { name: "yt-ios", ua: UA_MOBILE, extractor: "youtube:player_client=ios" },
+      { name: "yt-web", ua: UA_DESKTOP, extractor: "youtube:player_client=web" },
+      { name: "yt-tv", ua: UA_DESKTOP, extractor: "youtube:player_client=tv_embedded" },
+    ];
+  }
+  if (platform === "INSTAGRAM") {
+    return [
+      { name: "ig-default", ua: UA_DESKTOP },
+      { name: "ig-mobile", ua: UA_MOBILE },
+    ];
+  }
+  if (platform === "FACEBOOK") {
+    return [
+      { name: "fb-default", ua: UA_DESKTOP },
+      { name: "fb-mobile", ua: UA_MOBILE },
+    ];
+  }
+  if (platform === "TWITTER") {
+    return [
+      { name: "tw-default", ua: UA_DESKTOP },
+      { name: "tw-syndication", ua: UA_DESKTOP, extractor: "twitter:api=syndication" },
+      { name: "tw-legacy", ua: UA_DESKTOP, extractor: "twitter:legacy_api=1" },
+    ];
+  }
+  return [{ name: "default", ua: UA_DESKTOP }];
 }
 
 async function readProxySetting() {
@@ -116,19 +175,9 @@ async function handle(request: Request): Promise<Response> {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
   const UA_MOBILE =
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
-  const isTikTok = /tiktok\.com/i.test(target);
-
-  // 与 parse.ts 保持一致的多策略，确保解析成功的链接也能成功流式下载
-  const strategies: { name: string; ua: string; extractor?: string }[] = isTikTok
-    ? [
-        { name: "tiktok-default", ua: UA_DESKTOP },
-        { name: "tiktok-api-useast1a", ua: UA_DESKTOP, extractor: "tiktok:api_hostname=api22-normal-c-useast1a.tiktokv.com" },
-        { name: "tiktok-api-useast2a", ua: UA_DESKTOP, extractor: "tiktok:api_hostname=api16-normal-c-useast2a.tiktokv.com" },
-        { name: "tiktok-mobile-ua", ua: UA_MOBILE, extractor: "tiktok:app_name=trill;app_version=34.1.2;manifest_app_version=2023401020" },
-        { name: "tiktok-webpage", ua: UA_DESKTOP, extractor: "tiktok:webpage_url_basename=video" },
-      ]
-    : [{ name: "default", ua: UA_DESKTOP }];
-  const cookieArgSets = isTikTok ? await buildTikTokCookieArgSets() : [];
+  const platform = platformKey(target);
+  const strategies = buildPlatformStrategies(platform, UA_DESKTOP, UA_MOBILE);
+  const cookieArgSets = platform ? await buildCookieArgSets(platform) : [];
   const attempts = [
     ...strategies.map((strategy) => ({ ...strategy, extra: [] as string[] })),
     ...cookieArgSets.flatMap((cookieSet) =>
@@ -182,7 +231,7 @@ async function handle(request: Request): Promise<Response> {
   }
   if (!chosen) {
     if (needsCookies && cookieArgSets.length === 0) {
-      return new Response("TikTok login cookies required", { status: 502, headers: CORS });
+      return new Response(`${platform || "Platform"} login cookies required`, { status: 502, headers: CORS });
     }
     console.error("[api/media-stream] all strategies failed", lastErr.slice(0, 800));
     return new Response("stream unavailable", { status: 502, headers: CORS });
