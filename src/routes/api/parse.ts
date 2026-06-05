@@ -57,6 +57,41 @@ function pickRefererForSource(url: string): string {
   return "https://www.google.com/";
 }
 
+function isLoginCookieRequired(message: string): boolean {
+  return /log in for access|cookies? for the authentication|requires authentication|login required|not comfortable/i.test(
+    message,
+  );
+}
+
+async function buildTikTokCookieArgSets(): Promise<{ name: string; extra: string[] }[]> {
+  const sets: { name: string; extra: string[] }[] = [];
+  const cookieFile = process.env.TIKTOK_COOKIES_FILE || process.env.YTDLP_COOKIES_FILE;
+  const cookieHeader = process.env.TIKTOK_COOKIE_HEADER || process.env.TIKTOK_COOKIES_HEADER;
+  const cookieText = process.env.TIKTOK_COOKIES;
+  const cookieB64 = process.env.TIKTOK_COOKIES_B64;
+
+  if (cookieFile) sets.push({ name: "cookies-file", extra: ["--cookies", cookieFile] });
+  if (cookieHeader) sets.push({ name: "cookie-header", extra: ["--add-header", `cookie:${cookieHeader}`] });
+  if (cookieText || cookieB64) {
+    const content = cookieB64
+      ? Buffer.from(cookieB64, "base64").toString("utf8")
+      : String(cookieText || "").replace(/\\n/g, "\n");
+    const fs = await import("node:fs/promises");
+    const path = "/tmp/tiktok-cookies.txt";
+    await fs.writeFile(path, content, { mode: 0o600 });
+    sets.push({ name: "cookies-secret", extra: ["--cookies", path] });
+  }
+  return sets;
+}
+
+function redactSensitive(input: unknown, proxy = "") {
+  let text = String(input || "");
+  if (proxy) text = text.replaceAll(proxy, "[proxy]");
+  const cookieHeader = process.env.TIKTOK_COOKIE_HEADER || process.env.TIKTOK_COOKIES_HEADER;
+  if (cookieHeader) text = text.replaceAll(cookieHeader, "[tiktok-cookie]");
+  return text;
+}
+
 async function parseDomestic(url: string, endpoint: string, token: string) {
   const form = new FormData();
   form.append("token", token);
