@@ -24,6 +24,29 @@ function pickReferer(host: string): string | null {
     return "https://www.bilibili.com/";
   if (h.includes("weibocdn") || h.includes("weibo") || h.includes("sinaimg"))
     return "https://weibo.com/";
+  if (
+    h.includes("tiktok") ||
+    h.includes("tiktokcdn-") ||
+    h.includes("muscdn") ||
+    h.includes("musical.ly") ||
+    h.includes("byteoversea")
+  )
+    return "https://www.tiktok.com/";
+  if (
+    h.includes("youtube") ||
+    h.includes("youtu.be") ||
+    h.includes("googlevideo") ||
+    h.includes("ytimg")
+  )
+    return "https://www.youtube.com/";
+  if (h.includes("cdninstagram") || h.includes("instagram") || h.includes("fbcdn"))
+    return "https://www.instagram.com/";
+  if (h.includes("facebook") || h.includes("fbsbx"))
+    return "https://www.facebook.com/";
+  if (h.includes("twitter") || h.includes("twimg") || h.includes("x.com"))
+    return "https://twitter.com/";
+  if (h.includes("vimeo") || h.includes("vimeocdn"))
+    return "https://vimeo.com/";
   return null;
 }
 
