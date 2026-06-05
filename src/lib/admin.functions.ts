@@ -81,9 +81,9 @@ export const adjustCredits = createServerFn({ method: "POST" })
     z.object({ userId: z.string().uuid(), delta: z.number().int() }).parse(input),
   )
   .handler(async ({ data, context }) => {
-    const { userId } = context;
-    const supabaseAdmin = await assertAdmin(userId);
-    const { data: current, error: readError } = await supabaseAdmin
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    const { data: current, error: readError } = await supabase
       .from("profiles")
       .select("credits")
       .eq("id", data.userId)
@@ -91,7 +91,7 @@ export const adjustCredits = createServerFn({ method: "POST" })
     if (readError) throw new Error(readError.message);
     if (!current) throw new Error("用户不存在");
     const nextCredits = Math.max(0, Number(current.credits ?? 0) + data.delta);
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
       .from("profiles")
       .update({ credits: nextCredits })
       .eq("id", data.userId);
@@ -102,9 +102,9 @@ export const adjustCredits = createServerFn({ method: "POST" })
 export const getSignupBonus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { userId } = context;
-    const supabaseAdmin = await assertAdmin(userId);
-    const { data, error } = await supabaseAdmin
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    const { data, error } = await supabase
       .from("app_settings")
       .select("value")
       .eq("key", "signup_bonus_credits")
@@ -117,9 +117,9 @@ export const setSignupBonus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ value: z.number().int().min(0).max(100000) }).parse(input))
   .handler(async ({ data, context }) => {
-    const { userId } = context;
-    const supabaseAdmin = await assertAdmin(userId);
-    const { error } = await supabaseAdmin
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    const { error } = await supabase
       .from("app_settings")
       .upsert({ key: "signup_bonus_credits", value: data.value as any, updated_at: new Date().toISOString() });
     if (error) throw new Error(error.message);
@@ -133,9 +133,9 @@ const DEFAULT_API_PROXY = "";
 export const getApiConfig = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { userId } = context;
-    const supabaseAdmin = await assertAdmin(userId);
-    const { data, error } = await supabaseAdmin
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    const { data, error } = await supabase
       .from("app_settings")
       .select("key,value")
       .in("key", ["api_endpoint", "api_token", "api_proxy"]);
@@ -167,10 +167,10 @@ export const setApiConfig = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    const { userId } = context;
-    const supabaseAdmin = await assertAdmin(userId);
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
     const now = new Date().toISOString();
-    const { error } = await supabaseAdmin.from("app_settings").upsert([
+    const { error } = await supabase.from("app_settings").upsert([
       { key: "api_endpoint", value: data.endpoint as any, updated_at: now },
       { key: "api_token", value: data.token as any, updated_at: now },
       { key: "api_proxy", value: data.proxy as any, updated_at: now },
