@@ -91,30 +91,33 @@ async function parseOverseas(url: string, proxy: string) {
     ];
     if (proxy) args.push("--proxy", proxy);
 
-    const { stdout } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-      execFile(
-        configuredPath,
-        args,
-        {
-          encoding: "utf8",
-          timeout: 55_000,
-          maxBuffer: 20 * 1024 * 1024,
-          env: { ...process.env, PYTHONIOENCODING: "utf-8" },
-        },
-        (error, stdout, stderr) => {
-          if (error) {
-            reject(Object.assign(error, { stdout, stderr }));
-            return;
-          }
-          resolve({ stdout: String(stdout || ""), stderr: String(stderr || "") });
-        },
-      );
-    });
+    const { stdout } = await new Promise<{ stdout: string; stderr: string }>(
+      (resolve, reject) => {
+        execFile(
+          configuredPath,
+          args,
+          {
+            encoding: "utf8",
+            timeout: 55_000,
+            maxBuffer: 20 * 1024 * 1024,
+            env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+          },
+          (error, stdout, stderr) => {
+            if (error) {
+              reject(Object.assign(error, { stdout, stderr }));
+              return;
+            }
+            resolve({ stdout: String(stdout || ""), stderr: String(stderr || "") });
+          },
+        );
+      },
+    );
 
     const info: any = JSON.parse(stdout);
     const audioFmt =
-      (info.formats || []).find((f: any) => f.acodec && f.acodec !== "none" && (!f.vcodec || f.vcodec === "none")) ||
-      null;
+      (info.formats || []).find(
+        (f: any) => f.acodec && f.acodec !== "none" && (!f.vcodec || f.vcodec === "none"),
+      ) || null;
     const music = audioFmt?.url || info.url || info.webpage_url;
     if (!music) throw new Error("无可用音频流");
     return {
