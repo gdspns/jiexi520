@@ -89,64 +89,114 @@ async function parseOverseas(url: string, proxy: string) {
     );
   }
 
-  try {
-    const { execFile } = await import("node:child_process");
-    const referer = pickRefererForSource(url);
-    const args = [
-      url,
-      "--dump-single-json",
-      "--no-warnings",
-      "--no-check-certificates",
-      "--prefer-free-formats",
-      "--socket-timeout",
-      "30",
-      "--retries",
-      "3",
-      "--geo-bypass",
-      "--add-header",
-      `referer:${referer}`,
-      "--add-header",
-      "user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    ];
-    if (proxy) args.push("--proxy", proxy);
+  const { execFile } = await import("node:child_process");
+  const referer = pickRefererForSource(url);
+  const UA_DESKTOP =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+  const UA_MOBILE =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+  const isTikTok = /tiktok\.com/i.test(url);
 
-    const { stdout } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-      execFile(
-        configuredPath,
-        args,
+  const baseArgs = [
+    "--dump-single-json",
+    "--no-warnings",
+    "--no-check-certificates",
+    "--prefer-free-formats",
+    "--socket-timeout",
+    "30",
+    "--retries",
+    "3",
+    "--geo-bypass",
+    "--add-header",
+    `referer:${referer}`,
+  ];
+
+  // 多套策略：TikTok 不同视频对 extractor 的偏好不一样，按顺序重试
+  const strategies: { name: string; extra: string[] }[] = isTikTok
+    ? [
+        { name: "tiktok-default", extra: ["--add-header", `user-agent:${UA_DESKTOP}`] },
         {
-          encoding: "utf8",
-          timeout: 55_000,
-          maxBuffer: 20 * 1024 * 1024,
-          env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+          name: "tiktok-api-useast1a",
+          extra: [
+            "--add-header",
+            `user-agent:${UA_DESKTOP}`,
+            "--extractor-args",
+            "tiktok:api_hostname=api22-normal-c-useast1a.tiktokv.com",
+          ],
         },
-        (error, stdout, stderr) => {
-          if (error) {
-            reject(Object.assign(error, { stdout, stderr }));
-            return;
-          }
-          resolve({ stdout: String(stdout || ""), stderr: String(stderr || "") });
+        {
+          name: "tiktok-api-useast2a",
+          extra: [
+            "--add-header",
+            `user-agent:${UA_DESKTOP}`,
+            "--extractor-args",
+            "tiktok:api_hostname=api16-normal-c-useast2a.tiktokv.com",
+          ],
+        },
+        {
+          name: "tiktok-mobile-ua",
+          extra: [
+            "--add-header",
+            `user-agent:${UA_MOBILE}`,
+            "--extractor-args",
+            "tiktok:app_name=trill;app_version=34.1.2;manifest_app_version=2023401020",
+          ],
+        },
+        {
+          name: "tiktok-webpage",
+          extra: [
+            "--add-header",
+            `user-agent:${UA_DESKTOP}`,
+            "--extractor-args",
+            "tiktok:webpage_url_basename=video",
+          ],
+        },
+      ]
+    : [{ name: "default", extra: ["--add-header", `user-agent:${UA_DESKTOP}`] }];
+
+  const errors: string[] = [];
+  for (const strat of strategies) {
+    const args = [url, ...baseArgs, ...strat.extra];
+    if (proxy) args.push("--proxy", proxy);
+    try {
+      const { stdout } = await new Promise<{ stdout: string; stderr: string }>(
+        (resolve, reject) => {
+          execFile(
+            configuredPath,
+            args,
+            {
+              encoding: "utf8",
+              timeout: 55_000,
+              maxBuffer: 20 * 1024 * 1024,
+              env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+            },
+            (error, stdout, stderr) => {
+              if (error) {
+                reject(Object.assign(error, { stdout, stderr }));
+                return;
+              }
+              resolve({ stdout: String(stdout || ""), stderr: String(stderr || "") });
+            },
+          );
         },
       );
-    });
-
-    const info: any = JSON.parse(stdout);
-    return {
-      title: info.title || "提取的文件",
-      cover: info.thumbnail || "",
-      // TikTok/overseas CDN links are often signed to the server request and
-      // cannot be played by the browser directly. Use a same-origin stream that
-      // regenerates and pipes the media with yt-dlp for playback/download.
-      music_url: streamUrl(url, "audio"),
-      video_url: streamUrl(url, "video"),
-      original_url: url,
-      platform: determinePlatform(url),
-    };
-  } catch (e: any) {
-    const raw = e?.stderr || e?.message || String(e);
-    const safe = proxy ? String(raw).replaceAll(proxy, "[proxy]") : String(raw);
-    throw new Error("海外解析失败：" + safe.slice(0, 1200));
+      const info: any = JSON.parse(stdout);
+      return {
+        title: info.title || "提取的文件",
+        cover: info.thumbnail || "",
+        music_url: streamUrl(url, "audio"),
+        video_url: streamUrl(url, "video"),
+        original_url: url,
+        platform: determinePlatform(url),
+      };
+    } catch (e: any) {
+      const raw = e?.stderr || e?.message || String(e);
+      const safe = proxy ? String(raw).replaceAll(proxy, "[proxy]") : String(raw);
+      console.error(`[api/parse] strategy ${strat.name} failed:`, safe.slice(0, 800));
+      errors.push(`[${strat.name}] ${safe.slice(0, 400)}`);
+    }
   }
+  throw new Error("海外解析失败（已尝试 " + strategies.length + " 种策略）：" + errors.join(" || ").slice(0, 1500));
 }
 
 async function handle(request: Request): Promise<Response> {
