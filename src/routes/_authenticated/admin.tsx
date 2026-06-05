@@ -75,6 +75,8 @@ function AdminPage() {
   };
   const [products, setProducts] = useState<Product[]>([]);
   const [loadingProds, setLoadingProds] = useState(false);
+  const [savingProdIdx, setSavingProdIdx] = useState<number | null>(null);
+  const [savedProdIdx, setSavedProdIdx] = useState<number | null>(null);
 
   const reloadProducts = async () => {
     setLoadingProds(true);
@@ -121,12 +123,13 @@ function AdminPage() {
     }
   };
 
-  const onSaveProduct = async (p: Product) => {
+  const onSaveProduct = async (p: Product, idx: number) => {
     if (!p.name.trim()) return alert("请填写商品名称");
     if (!Number.isFinite(p.price) || p.price < 0) return alert("价格非法");
     if (!Number.isFinite(p.credits) || p.credits < 0) return alert("次数非法");
+    setSavingProdIdx(idx);
     try {
-      await saveProd({ data: {
+      const res = await saveProd({ data: {
         id: p.id,
         name: p.name.trim(),
         price: Math.round(p.price),
@@ -135,9 +138,16 @@ function AdminPage() {
         enabled: p.enabled,
         sort_order: Math.round(p.sort_order || 0),
       }});
-      await reloadProducts();
+      // 写回 id（新增情况），避免重新拉取整列表导致页面闪动
+      if (!p.id && res?.id) {
+        setProducts((arr) => arr.map((x, i) => i === idx ? { ...x, id: res.id, _editing: false } : x));
+      }
+      setSavedProdIdx(idx);
+      setTimeout(() => setSavedProdIdx((cur) => (cur === idx ? null : cur)), 1500);
     } catch (e: any) {
       alert(e?.message || "保存失败");
+    } finally {
+      setSavingProdIdx((cur) => (cur === idx ? null : cur));
     }
   };
 
