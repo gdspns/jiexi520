@@ -81,7 +81,7 @@ export const Route = createFileRoute("/api/recharge/create")({
           const url = new URL(request.url);
           const origin = `${url.protocol}//${url.host}`;
           const notifyUrl = `${origin}/api/public/xunhupay-notify`;
-          const returnUrl = `${origin}/index.html?recharge=${orderNo}`;
+          const returnUrl = `${origin}/?recharge=${orderNo}`;
 
           const clientIp =
             request.headers.get("cf-connecting-ip") ||
