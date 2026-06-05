@@ -32,6 +32,104 @@ export type Database = {
         }
         Relationships: []
       }
+      payment_config: {
+        Row: {
+          alipay_appid: string
+          alipay_appsecret: string
+          alipay_enabled: boolean
+          api_endpoint: string
+          key: string
+          updated_at: string
+          wechat_appid: string
+          wechat_appsecret: string
+          wechat_enabled: boolean
+        }
+        Insert: {
+          alipay_appid?: string
+          alipay_appsecret?: string
+          alipay_enabled?: boolean
+          api_endpoint?: string
+          key?: string
+          updated_at?: string
+          wechat_appid?: string
+          wechat_appsecret?: string
+          wechat_enabled?: boolean
+        }
+        Update: {
+          alipay_appid?: string
+          alipay_appsecret?: string
+          alipay_enabled?: boolean
+          api_endpoint?: string
+          key?: string
+          updated_at?: string
+          wechat_appid?: string
+          wechat_appsecret?: string
+          wechat_enabled?: boolean
+        }
+        Relationships: []
+      }
+      payment_orders: {
+        Row: {
+          amount: number
+          channel: string
+          created_at: string
+          credits: number
+          expires_at: string
+          id: string
+          order_no: string
+          paid_at: string | null
+          product_id: string | null
+          product_name: string
+          qr_url: string | null
+          status: string
+          trade_order_id: string | null
+          user_id: string
+          wap_url: string | null
+        }
+        Insert: {
+          amount: number
+          channel: string
+          created_at?: string
+          credits: number
+          expires_at: string
+          id?: string
+          order_no: string
+          paid_at?: string | null
+          product_id?: string | null
+          product_name: string
+          qr_url?: string | null
+          status?: string
+          trade_order_id?: string | null
+          user_id: string
+          wap_url?: string | null
+        }
+        Update: {
+          amount?: number
+          channel?: string
+          created_at?: string
+          credits?: number
+          expires_at?: string
+          id?: string
+          order_no?: string
+          paid_at?: string | null
+          product_id?: string | null
+          product_name?: string
+          qr_url?: string | null
+          status?: string
+          trade_order_id?: string | null
+          user_id?: string
+          wap_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_orders_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "recharge_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           banned: boolean
@@ -53,6 +151,42 @@ export type Database = {
           credits?: number
           email?: string
           id?: string
+        }
+        Relationships: []
+      }
+      recharge_products: {
+        Row: {
+          created_at: string
+          credits: number
+          discount_price: number | null
+          enabled: boolean
+          id: string
+          name: string
+          price: number
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          credits: number
+          discount_price?: number | null
+          enabled?: boolean
+          id?: string
+          name: string
+          price: number
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          credits?: number
+          discount_price?: number | null
+          enabled?: boolean
+          id?: string
+          name?: string
+          price?: number
+          sort_order?: number
+          updated_at?: string
         }
         Relationships: []
       }
@@ -94,6 +228,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      recharge_add_credits: {
+        Args: { _delta: number; _user_id: string }
+        Returns: number
       }
     }
     Enums: {
