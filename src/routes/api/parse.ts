@@ -57,6 +57,41 @@ function pickRefererForSource(url: string): string {
   return "https://www.google.com/";
 }
 
+function isLoginCookieRequired(message: string): boolean {
+  return /log in for access|cookies? for the authentication|requires authentication|login required|not comfortable/i.test(
+    message,
+  );
+}
+
+async function buildTikTokCookieArgSets(): Promise<{ name: string; extra: string[] }[]> {
+  const sets: { name: string; extra: string[] }[] = [];
+  const cookieFile = process.env.TIKTOK_COOKIES_FILE || process.env.YTDLP_COOKIES_FILE;
+  const cookieHeader = process.env.TIKTOK_COOKIE_HEADER || process.env.TIKTOK_COOKIES_HEADER;
+  const cookieText = process.env.TIKTOK_COOKIES;
+  const cookieB64 = process.env.TIKTOK_COOKIES_B64;
+
+  if (cookieFile) sets.push({ name: "cookies-file", extra: ["--cookies", cookieFile] });
+  if (cookieHeader) sets.push({ name: "cookie-header", extra: ["--add-header", `cookie:${cookieHeader}`] });
+  if (cookieText || cookieB64) {
+    const content = cookieB64
+      ? Buffer.from(cookieB64, "base64").toString("utf8")
+      : String(cookieText || "").replace(/\\n/g, "\n");
+    const fs = await import("node:fs/promises");
+    const path = "/tmp/tiktok-cookies.txt";
+    await fs.writeFile(path, content, { mode: 0o600 });
+    sets.push({ name: "cookies-secret", extra: ["--cookies", path] });
+  }
+  return sets;
+}
+
+function redactSensitive(input: unknown, proxy = "") {
+  let text = String(input || "");
+  if (proxy) text = text.replaceAll(proxy, "[proxy]");
+  const cookieHeader = process.env.TIKTOK_COOKIE_HEADER || process.env.TIKTOK_COOKIES_HEADER;
+  if (cookieHeader) text = text.replaceAll(cookieHeader, "[tiktok-cookie]");
+  return text;
+}
+
 async function parseDomestic(url: string, endpoint: string, token: string) {
   const form = new FormData();
   form.append("token", token);
@@ -153,9 +188,20 @@ async function parseOverseas(url: string, proxy: string) {
         },
       ]
     : [{ name: "default", extra: ["--add-header", `user-agent:${UA_DESKTOP}`] }];
+  const cookieArgSets = isTikTok ? await buildTikTokCookieArgSets() : [];
+  const attempts = [
+    ...strategies.map((strategy) => ({ name: strategy.name, extra: strategy.extra })),
+    ...cookieArgSets.flatMap((cookieSet) =>
+      strategies.map((strategy) => ({
+        name: `${strategy.name}+${cookieSet.name}`,
+        extra: [...strategy.extra, ...cookieSet.extra],
+      })),
+    ),
+  ];
 
   const errors: string[] = [];
-  for (const strat of strategies) {
+  let needsCookies = false;
+  for (const strat of attempts) {
     const args = [url, ...baseArgs, ...strat.extra];
     if (proxy) args.push("--proxy", proxy);
     try {
@@ -191,12 +237,18 @@ async function parseOverseas(url: string, proxy: string) {
       };
     } catch (e: any) {
       const raw = e?.stderr || e?.message || String(e);
-      const safe = proxy ? String(raw).replaceAll(proxy, "[proxy]") : String(raw);
+      const safe = redactSensitive(raw, proxy);
+      if (isLoginCookieRequired(safe)) needsCookies = true;
       console.error(`[api/parse] strategy ${strat.name} failed:`, safe.slice(0, 800));
       errors.push(`[${strat.name}] ${safe.slice(0, 400)}`);
     }
   }
-  throw new Error("海外解析失败（已尝试 " + strategies.length + " 种策略）：" + errors.join(" || ").slice(0, 1500));
+  if (needsCookies && cookieArgSets.length === 0) {
+    throw new Error(
+      "该 TikTok 视频需要登录 Cookie 才能解析（不是代码逻辑问题）。请在 Zeabur 环境变量添加 TIKTOK_COOKIES（Netscape cookies.txt 内容）或 TIKTOK_COOKIE_HEADER 后重启。",
+    );
+  }
+  throw new Error("海外解析失败（已尝试 " + attempts.length + " 种策略）：" + errors.join(" || ").slice(0, 1500));
 }
 
 async function handle(request: Request): Promise<Response> {
