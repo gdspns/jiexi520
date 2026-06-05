@@ -2,31 +2,29 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-async function assertAdmin(userId: string) {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+async function assertAdmin(supabase: any, userId: string) {
   const [{ data: profile }, { data: roles }] = await Promise.all([
-    supabaseAdmin.from("profiles").select("email").eq("id", userId).maybeSingle(),
-    supabaseAdmin.from("user_roles").select("role").eq("user_id", userId),
+    supabase.from("profiles").select("email").eq("id", userId).maybeSingle(),
+    supabase.from("user_roles").select("role").eq("user_id", userId),
   ]);
   const isAdminEmail = profile?.email === "3075554556@qq.com";
   const hasAdminRole = roles?.some((r) => r.role === "admin") === true;
   if (!isAdminEmail && !hasAdminRole) throw new Error("无权限");
-  return supabaseAdmin;
 }
 
 export const listUsers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { userId } = context;
-    const supabaseAdmin = await assertAdmin(userId);
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
 
-    const { data: profiles, error } = await supabaseAdmin
+    const { data: profiles, error } = await supabase
       .from("profiles")
       .select("id, email, banned, credits, created_at")
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
 
-    const { data: roles, error: rolesError } = await supabaseAdmin
+    const { data: roles, error: rolesError } = await supabase
       .from("user_roles")
       .select("user_id, role");
     if (rolesError) throw new Error(rolesError.message);
