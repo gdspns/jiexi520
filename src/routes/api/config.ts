@@ -20,8 +20,16 @@ async function handle(request: Request): Promise<Response> {
   }
   const token = m[1];
 
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(token);
+  const { createClient } = await import("@supabase/supabase-js");
+  const userSb = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_PUBLISHABLE_KEY!,
+    {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    },
+  );
+  const { data: userData, error: userErr } = await userSb.auth.getUser(token);
   if (userErr || !userData.user) {
     return new Response(JSON.stringify({ error: "登录无效" }), {
       status: 401,
@@ -29,7 +37,7 @@ async function handle(request: Request): Promise<Response> {
     });
   }
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await userSb
     .from("app_settings")
     .select("key,value")
     .in("key", ["api_endpoint", "api_token"]);
