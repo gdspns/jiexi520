@@ -22,6 +22,21 @@ function isSupportedSource(url: string) {
   );
 }
 
+async function readProxySetting() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return "";
+  try {
+    const { createClient } = await import("@supabase/supabase-js");
+    const sb = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+    const { data } = await sb.from("app_settings").select("value").eq("key", "api_proxy").maybeSingle();
+    return typeof data?.value === "string" ? data.value : data?.value == null ? "" : String(data.value);
+  } catch (err) {
+    console.error("[api/media-stream] failed to read proxy setting", err);
+    return "";
+  }
+}
+
 async function handle(request: Request): Promise<Response> {
   const reqUrl = new URL(request.url);
   const target = (reqUrl.searchParams.get("url") || "").trim();
@@ -47,6 +62,7 @@ async function handle(request: Request): Promise<Response> {
   }
 
   const { spawn } = await import("node:child_process");
+  const proxy = await readProxySetting();
   const args = [
     target,
     "--no-warnings",
@@ -63,6 +79,7 @@ async function handle(request: Request): Promise<Response> {
   // TikTok usually serves a progressive mp4 with the audio track included.
   // Using a progressive mp4 keeps playback/download compatible without ffmpeg.
   args.splice(1, 0, "-f", "best[ext=mp4]/best");
+  if (proxy) args.push("--proxy", proxy);
 
   const child = spawn(configuredPath, args, {
     stdio: ["ignore", "pipe", "pipe"],
