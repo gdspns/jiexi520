@@ -30,6 +30,7 @@ export const getPaymentConfig = createServerFn({ method: "GET" })
       wechat_appid: "", wechat_appsecret: "", wechat_enabled: false,
       alipay_appid: "", alipay_appsecret: "", alipay_enabled: false,
       api_endpoint: "https://api.xunhupay.com/payment/do.html",
+      notify_base_url: "",
     };
   });
 
@@ -44,6 +45,10 @@ export const setPaymentConfig = createServerFn({ method: "POST" })
       alipay_appsecret: z.string().trim().max(128),
       alipay_enabled: z.boolean(),
       api_endpoint: z.string().trim().url().max(300),
+      notify_base_url: z.string().trim().max(300).refine(
+        (v) => v === "" || /^https?:\/\//i.test(v),
+        "回调域名必须以 http(s):// 开头或留空",
+      ),
     }).parse(input),
   )
   .handler(async ({ data, context }) => {

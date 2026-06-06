@@ -81,9 +81,13 @@ export const Route = createFileRoute("/api/recharge/create")({
           const url = new URL(request.url);
           const fwdHost = request.headers.get("x-forwarded-host") || request.headers.get("host") || url.host;
           const fwdProto = request.headers.get("x-forwarded-proto") || (url.protocol.replace(":", "")) || "https";
-          const origin = `${fwdProto}://${fwdHost}`;
-          const notifyUrl = `${origin}/api/public/xunhupay-notify`;
-          const returnUrl = `${origin}/?recharge=${orderNo}`;
+          const requestOrigin = `${fwdProto}://${fwdHost}`;
+          // 异步回调必须走公网可达且无登录拦截的地址
+          // 优先使用后台配置的 notify_base_url（应为发布域名，如 https://jiexi520.lovable.app）
+          // 因为 lovable 预览域名 id-preview--*.lovable.app 会强制重定向到登录页，外部回调进不来
+          const notifyBase = ((cfgRow as any).notify_base_url || "").replace(/\/+$/, "") || requestOrigin;
+          const notifyUrl = `${notifyBase}/api/public/xunhupay-notify`;
+          const returnUrl = `${requestOrigin}/?recharge=${orderNo}`;
 
           const clientIp =
             request.headers.get("cf-connecting-ip") ||

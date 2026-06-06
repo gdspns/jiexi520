@@ -65,6 +65,7 @@ function AdminPage() {
     wechat_appid: "", wechat_appsecret: "", wechat_enabled: false,
     alipay_appid: "", alipay_appsecret: "", alipay_enabled: false,
     api_endpoint: "https://api.xunhupay.com/payment/do.html",
+    notify_base_url: "",
   });
   const [showWxSecret, setShowWxSecret] = useState(false);
   const [showAliSecret, setShowAliSecret] = useState(false);
@@ -140,6 +141,7 @@ function AdminPage() {
       alipay_appsecret: r.alipay_appsecret || "",
       alipay_enabled: !!r.alipay_enabled,
       api_endpoint: r.api_endpoint || "https://api.xunhupay.com/payment/do.html",
+      notify_base_url: r.notify_base_url || "",
     })).catch(() => {});
     reloadProducts().catch(() => {});
     reloadOrders().catch(() => {});
@@ -629,6 +631,13 @@ function AdminPage() {
                   <input value={payCfg.api_endpoint} onChange={(e) => setPayCfg({ ...payCfg, api_endpoint: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500" />
                   <p className="text-[11px] text-slate-500 mt-1">默认 https://api.xunhupay.com/payment/do.html ，无特殊需求请勿修改。回调地址会自动设为 /api/public/xunhupay-notify。</p>
+                </div>
+                <div className="mt-3">
+                  <label className="block text-xs text-slate-400 mb-1">异步回调域名（重要）</label>
+                  <input value={payCfg.notify_base_url} onChange={(e) => setPayCfg({ ...payCfg, notify_base_url: e.target.value })}
+                    placeholder="https://jiexi520.lovable.app"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500" />
+                  <p className="text-[11px] text-yellow-400/80 mt-1">⚠ 必须填写已发布的公网域名（如 https://jiexi520.lovable.app 或绑定的自定义域名）。预览域名 id-preview--*.lovable.app 会拦截外部回调导致付款后不到账。留空则使用当前请求域名。</p>
                 </div>
                 <div className="mt-4">
                   <button onClick={onSavePay} disabled={savingPay}
