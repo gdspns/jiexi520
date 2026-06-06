@@ -77,9 +77,11 @@ export const Route = createFileRoute("/api/recharge/create")({
           const orderNo = genOrderNo();
           const expiresAt = new Date(Date.now() + 20 * 60 * 1000).toISOString();
 
-          // 计算 notify/return URL
+          // 计算 notify/return URL —— 优先使用代理转发的 host，确保虎皮椒能从公网回调
           const url = new URL(request.url);
-          const origin = `${url.protocol}//${url.host}`;
+          const fwdHost = request.headers.get("x-forwarded-host") || request.headers.get("host") || url.host;
+          const fwdProto = request.headers.get("x-forwarded-proto") || (url.protocol.replace(":", "")) || "https";
+          const origin = `${fwdProto}://${fwdHost}`;
           const notifyUrl = `${origin}/api/public/xunhupay-notify`;
           const returnUrl = `${origin}/?recharge=${orderNo}`;
 
