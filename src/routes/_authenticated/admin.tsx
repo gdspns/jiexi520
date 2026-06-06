@@ -65,6 +65,7 @@ function AdminPage() {
     wechat_appid: "", wechat_appsecret: "", wechat_enabled: false,
     alipay_appid: "", alipay_appsecret: "", alipay_enabled: false,
     api_endpoint: "https://api.xunhupay.com/payment/do.html",
+    notify_base_url: "",
   });
   const [showWxSecret, setShowWxSecret] = useState(false);
   const [showAliSecret, setShowAliSecret] = useState(false);
@@ -140,6 +141,7 @@ function AdminPage() {
       alipay_appsecret: r.alipay_appsecret || "",
       alipay_enabled: !!r.alipay_enabled,
       api_endpoint: r.api_endpoint || "https://api.xunhupay.com/payment/do.html",
+      notify_base_url: r.notify_base_url || "",
     })).catch(() => {});
     reloadProducts().catch(() => {});
     reloadOrders().catch(() => {});
