@@ -1224,7 +1224,13 @@
         const qrBox = body.querySelector("#qr-box");
         try {
           if (order.qr_url) {
-            new QRCode(qrBox, { text: order.qr_url, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M });
+            // 虎皮椒返回的 qr_url 本身就是一张二维码图片地址，直接当图片渲染
+            // 否则（native scheme 如 weixin://、alipays://）才用 QRCode 库生成
+            if (/^https?:\/\//i.test(order.qr_url)) {
+              qrBox.innerHTML = `<img src="${order.qr_url}" alt="支付二维码" style="width:200px;height:200px;display:block;" />`;
+            } else {
+              new QRCode(qrBox, { text: order.qr_url, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M });
+            }
           } else {
             qrBox.innerHTML = '<p class="text-slate-500 text-xs">无二维码</p>';
           }
