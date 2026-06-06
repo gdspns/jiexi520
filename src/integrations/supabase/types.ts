@@ -39,6 +39,7 @@ export type Database = {
           alipay_enabled: boolean
           api_endpoint: string
           key: string
+          notify_base_url: string
           updated_at: string
           wechat_appid: string
           wechat_appsecret: string
@@ -50,6 +51,7 @@ export type Database = {
           alipay_enabled?: boolean
           api_endpoint?: string
           key?: string
+          notify_base_url?: string
           updated_at?: string
           wechat_appid?: string
           wechat_appsecret?: string
@@ -61,6 +63,7 @@ export type Database = {
           alipay_enabled?: boolean
           api_endpoint?: string
           key?: string
+          notify_base_url?: string
           updated_at?: string
           wechat_appid?: string
           wechat_appsecret?: string

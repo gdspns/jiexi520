@@ -1,0 +1,1 @@
+ALTER TABLE public.payment_config ADD COLUMN IF NOT EXISTS notify_base_url TEXT NOT NULL DEFAULT '';
