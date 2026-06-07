@@ -781,10 +781,17 @@ function AdminPage() {
                           </td>
                           <td className="px-3 py-2 text-slate-400 text-xs">{new Date(o.created_at).toLocaleString("zh-CN")}</td>
                           <td className="px-3 py-2 text-slate-400 text-xs">{o.paid_at ? new Date(o.paid_at).toLocaleString("zh-CN") : "—"}</td>
+                          <td className="px-3 py-2 text-right">
+                            <button
+                              disabled={busy === o.id}
+                              onClick={() => onDeleteOrder(o.id, o.order_no)}
+                              className="px-3 py-1 rounded bg-red-600/80 hover:bg-red-600 text-white text-xs disabled:opacity-50"
+                            >删除</button>
+                          </td>
                         </tr>
                       ))}
                       {orders.length === 0 && (
-                        <tr><td colSpan={8} className="text-center text-slate-500 py-8">暂无订单</td></tr>
+                        <tr><td colSpan={9} className="text-center text-slate-500 py-8">暂无订单</td></tr>
                       )}
                     </tbody>
                   </table>
