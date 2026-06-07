@@ -750,6 +750,7 @@ function AdminPage() {
                         <th className="text-left px-3 py-2">状态</th>
                         <th className="text-left px-3 py-2">创建时间</th>
                         <th className="text-left px-3 py-2">支付时间</th>
+                        <th className="text-right px-3 py-2">操作</th>
                       </tr>
                     </thead>
                     <tbody>
