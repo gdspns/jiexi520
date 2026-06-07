@@ -485,6 +485,26 @@
                     blob = await response.blob();
                 }
 
+                // 移动端：尝试调用系统分享，让用户选择"保存视频/图片到相册"
+                const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+                if (isMobile && !isAudio) {
+                    try {
+                        const file = new File([blob], fileName, { type: blob.type || 'video/mp4' });
+                        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                            showToast('📲 请在弹出的菜单中点击【存储视频 / 保存到相册】', 'info');
+                            await navigator.share({ files: [file], title: fileName });
+                            showToast('✅ 已调起系统保存，请在相册中查看', 'success');
+                            return;
+                        }
+                    } catch (shareErr) {
+                        if (shareErr && shareErr.name === 'AbortError') {
+                            showToast('已取消保存', 'info');
+                            return;
+                        }
+                        console.warn('系统分享失败，回退浏览器下载', shareErr);
+                    }
+                }
+
                 const blobUrl = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.style.display = 'none';
@@ -499,7 +519,7 @@
                 }, 1000);
                 
                 if (isAudio) showToast('✅ 真 MP3 转码完成并已触发下载！', 'success');
-                else showToast('✅ 视频下载准备就绪！', 'success');
+                else showToast(isMobile ? '✅ 视频已下载，请到浏览器下载列表中长按选择"保存到相册"' : '✅ 视频下载准备就绪！', 'success');
 
             } catch (err) {
                 console.warn("跨域且全部代理均失败，后台静默下载被彻底阻断:", err);
