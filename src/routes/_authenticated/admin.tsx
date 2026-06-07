@@ -3,14 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig } from "@/lib/admin.functions";
-import {
-  getPaymentConfig,
-  setPaymentConfig,
-  listProductsAdmin,
-  upsertProduct,
-  deleteProduct,
-  listOrdersAdmin,
-} from "@/lib/payment.functions";
+import { deleteOrder, getPaymentConfig, listOrdersAdmin, listProductsAdmin, setPaymentConfig, upsertProduct, deleteProduct } from "@/lib/payment.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated/admin")({
@@ -48,6 +41,7 @@ function AdminPage() {
   const saveProd = useServerFn(upsertProduct);
   const removeProd = useServerFn(deleteProduct);
   const listOrders = useServerFn(listOrdersAdmin);
+  const removeOrder = useServerFn(deleteOrder);
 
   const [busy, setBusy] = useState<string | null>(null);
   const [bonus, setBonus] = useState<number | "">("");
@@ -192,6 +186,19 @@ function AdminPage() {
     if (!confirm("确定删除该商品？")) return;
     try { await removeProd({ data: { id } }); await reloadProducts(); }
     catch (e: any) { alert(e?.message || "删除失败"); }
+  };
+
+  const onDeleteOrder = async (id: string, orderNo: string) => {
+    if (!confirm(`确定删除订单 ${orderNo}？此操作无法撤销。`)) return;
+    setBusy(id);
+    try {
+      await removeOrder({ data: { id } });
+      setOrders((arr) => arr.filter((o) => o.id !== id));
+    } catch (e: any) {
+      alert(e?.message || "删除失败");
+    } finally {
+      setBusy(null);
+    }
   };
 
   const addNewProduct = () => {
@@ -743,6 +750,7 @@ function AdminPage() {
                         <th className="text-left px-3 py-2">状态</th>
                         <th className="text-left px-3 py-2">创建时间</th>
                         <th className="text-left px-3 py-2">支付时间</th>
+                        <th className="text-right px-3 py-2">操作</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -773,10 +781,17 @@ function AdminPage() {
                           </td>
                           <td className="px-3 py-2 text-slate-400 text-xs">{new Date(o.created_at).toLocaleString("zh-CN")}</td>
                           <td className="px-3 py-2 text-slate-400 text-xs">{o.paid_at ? new Date(o.paid_at).toLocaleString("zh-CN") : "—"}</td>
+                          <td className="px-3 py-2 text-right">
+                            <button
+                              disabled={busy === o.id}
+                              onClick={() => onDeleteOrder(o.id, o.order_no)}
+                              className="px-3 py-1 rounded bg-red-600/80 hover:bg-red-600 text-white text-xs disabled:opacity-50"
+                            >删除</button>
+                          </td>
                         </tr>
                       ))}
                       {orders.length === 0 && (
-                        <tr><td colSpan={8} className="text-center text-slate-500 py-8">暂无订单</td></tr>
+                        <tr><td colSpan={9} className="text-center text-slate-500 py-8">暂无订单</td></tr>
                       )}
                     </tbody>
                   </table>
