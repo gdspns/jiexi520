@@ -563,7 +563,6 @@
             try {
                 currentSingleData = await fetchVideoDataAPI(urls[0]);
                 renderSingleResult(currentSingleData);
-                if (window.__consumeCredit) await window.__consumeCredit();
             } catch (err) {
                 showToast(err.message, 'error');
             } finally {
@@ -675,7 +674,6 @@
                     const data = await fetchVideoDataAPI(url);
                     batchResultsData.push(data);
                     appendBatchResult(data, i+1, 'success');
-                    if (window.__consumeCredit) await window.__consumeCredit();
                 } catch (err) {
                     appendBatchResult({ original_url: url, title: `解析失败: ${err.message}` }, i+1, 'error');
                 }
@@ -1050,6 +1048,16 @@
       window.__requireCredits = requireCredits;
       window.__consumeCredit = consumeOneCredit;
       window.__refreshCredits = refreshAuth;
+
+      // 后端 /api/parse 已扣减次数并返回余额，这里同步更新顶部显示
+      window.addEventListener('credits:updated', (e) => {
+        const v = e && e.detail;
+        if (typeof v === 'number') {
+          userCredits = v;
+          window.__userCredits = v;
+          try { renderBar(); } catch {}
+        }
+      });
 
       // 拦截：单链接解析表单提交
       document.getElementById("convert-form")?.addEventListener("submit", (e) => {
