@@ -41,6 +41,7 @@ function AdminPage() {
   const saveProd = useServerFn(upsertProduct);
   const removeProd = useServerFn(deleteProduct);
   const listOrders = useServerFn(listOrdersAdmin);
+  const removeOrder = useServerFn(deleteOrder);
 
   const [busy, setBusy] = useState<string | null>(null);
   const [bonus, setBonus] = useState<number | "">("");
