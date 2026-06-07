@@ -3,14 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig } from "@/lib/admin.functions";
-import {
-  getPaymentConfig,
-  setPaymentConfig,
-  listProductsAdmin,
-  upsertProduct,
-  deleteProduct,
-  listOrdersAdmin,
-} from "@/lib/payment.functions";
+import { deleteOrder, getPaymentConfig, listOrdersAdmin, listProductsAdmin, setPaymentConfig, upsertProduct, deleteProduct } from "@/lib/payment.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated/admin")({
