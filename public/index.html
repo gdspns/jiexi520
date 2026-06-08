@@ -808,15 +808,15 @@
                 // 绑定单独项的重编码下载方法
                 const audioBtn = div.querySelector('.dl-audio-btn');
                 if (audioBtn) {
-                    audioBtn.addEventListener('click', () => {
-                        downloadMedia(data.music_url, `${safeTitle}.mp3`, true);
+                    audioBtn.addEventListener('click', (e) => {
+                        downloadMedia(data.music_url, `${safeTitle}.mp3`, true, e.currentTarget);
                     });
                 }
                 
                 const videoBtn = div.querySelector('.dl-video-btn');
                 if (videoBtn && data.video_url) {
-                    videoBtn.addEventListener('click', () => {
-                        downloadMedia(data.video_url, `${safeTitle}.mp4`, false);
+                    videoBtn.addEventListener('click', (e) => {
+                        downloadMedia(data.video_url, `${safeTitle}.mp4`, false, e.currentTarget);
                     });
                 }
                 
