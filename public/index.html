@@ -416,12 +416,43 @@
         }
 
         // --- 新增强化：更适合二进制流传输的高级 CORS 代理 ---
-        async function smartFetch(url) {
+        async function smartFetch(url, onProgress) {
             // 走自家后端媒体代理，由 Worker 携带正确的 Referer/UA 抓取，绕开防盗链和 CORS
             const proxied = proxify(url);
             const res = await fetch(proxied);
             if (!res.ok) throw new Error('媒体代理返回 ' + res.status);
             return res;
+        }
+
+        // 带下载进度追踪的 fetch
+        async function fetchWithProgress(url, onProgress) {
+            const proxied = proxify(url);
+            const response = await fetch(proxied);
+            if (!response.ok) throw new Error('媒体代理返回 ' + response.status);
+            if (!response.body || !onProgress) return response;
+
+            const contentLength = +(response.headers.get('Content-Length') || 0);
+            if (!contentLength) return response;
+
+            const reader = response.body.getReader();
+            const chunks = [];
+            let received = 0;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                chunks.push(value);
+                received += value.length;
+                onProgress((received / contentLength) * 100);
+            }
+
+            // 将 chunks 合并成新的 Response
+            const blob = new Blob(chunks);
+            return new Response(blob, {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers,
+            });
         }
 
         // 构造同源媒体代理 URL，让 <audio>/<video> 与 fetch 都能稳定加载远端 CDN
@@ -464,28 +495,59 @@
             }
             const finalBuf = enc.flush();
             if(finalBuf.length > 0) mp3Data.push(finalBuf);
+            if (progressCallback) progressCallback(100);
             
             return new Blob(mp3Data, { type: 'audio/mpeg' });
         }
 
-        // 通用下载包装器（包含极致防御，绝对不跳新网页）
-        async function downloadMedia(url, fileName, isAudio) {
+        // 通用下载包装器（包含进度条显示）
+        async function downloadMedia(url, fileName, isAudio, btnEl = null) {
+            const originalHTML = btnEl ? btnEl.innerHTML : null;
+            const originalDisabled = btnEl ? btnEl.disabled : false;
+
+            function setBtnProgress(text, percent = null) {
+                if (!btnEl) return;
+                btnEl.disabled = true;
+                if (percent !== null) {
+                    btnEl.innerHTML = `
+                        <div class="relative w-full h-full flex items-center justify-center overflow-hidden rounded-xl">
+                            <div class="absolute left-0 top-0 bottom-0 bg-white/25 transition-all duration-200" style="width:${Math.min(percent,100)}%"></div>
+                            <span class="relative z-10 font-bold text-xs truncate px-1">${text}</span>
+                        </div>`;
+                } else {
+                    btnEl.innerHTML = `<span class="font-bold text-xs">${text}</span>`;
+                }
+            }
+
+            function restoreBtn() {
+                if (!btnEl) return;
+                btnEl.innerHTML = originalHTML;
+                btnEl.disabled = originalDisabled;
+            }
+
             try {
                 if (isAudio) showToast('正在后台高速抓取并转码为纯正 MP3，请耐心等待切勿关闭页面...', 'info');
                 else showToast('正在后台高速拉取无水印视频，请稍候...', 'info');
 
-                // 强制使用经过强化的代理网络请求
-                const response = await smartFetch(url);
+                setBtnProgress('下载 0%', 0);
+
+                // 带进度追踪下载
+                const response = await fetchWithProgress(url, (pct) => {
+                    setBtnProgress(`下载 ${Math.round(pct)}%`, pct);
+                });
 
                 let blob;
                 if (isAudio) {
                     const arrayBuffer = await response.arrayBuffer();
-                    blob = await convertToMp3Blob(arrayBuffer);
+                    setBtnProgress('转码 0%', 0);
+                    blob = await convertToMp3Blob(arrayBuffer, (pct) => {
+                        setBtnProgress(`转码 ${Math.round(pct)}%`, pct);
+                    });
                 } else {
                     blob = await response.blob();
                 }
 
-                // 移动端：尝试调用系统分享，让用户选择"保存视频/图片到相册"
+                // 移动端：尝试调用系统分享
                 const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
                 if (isMobile && !isAudio) {
                     try {
@@ -494,11 +556,13 @@
                             showToast('📲 请在弹出的菜单中点击【存储视频 / 保存到相册】', 'info');
                             await navigator.share({ files: [file], title: fileName });
                             showToast('✅ 已调起系统保存，请在相册中查看', 'success');
+                            restoreBtn();
                             return;
                         }
                     } catch (shareErr) {
                         if (shareErr && shareErr.name === 'AbortError') {
                             showToast('已取消保存', 'info');
+                            restoreBtn();
                             return;
                         }
                         console.warn('系统分享失败，回退浏览器下载', shareErr);
@@ -523,11 +587,11 @@
 
             } catch (err) {
                 console.warn("跨域且全部代理均失败，后台静默下载被彻底阻断:", err);
+                setBtnProgress('下载失败');
+                setTimeout(restoreBtn, 2000);
                 
-                // 【修改点1】：修改单链接解析失败时的报错提示，引导用户使用本地转换
                 showToast(`⚠️ 平台防盗链极严格，后台转码被阻断！已为您复制直链。👉 请在新网页手动下载视频后，使用上方的【本地转换】功能提取 MP3！`, 'error');
                 
-                // 辅助用户：自动将直链复制到剪贴板，方便用户手动去下载
                 try {
                     const ta = document.createElement("textarea"); ta.value = url;
                     document.body.appendChild(ta); ta.select();
@@ -535,7 +599,10 @@
                     document.body.removeChild(ta);
                     setTimeout(() => showToast('📥 直链已复制到剪贴板，快去浏览器新建页面粘贴并保存视频吧！', 'info'), 3500);
                 } catch(e) {}
+                return;
             }
+
+            restoreBtn();
         }
 
         // ================= Tabs 切换逻辑 =================
@@ -617,11 +684,11 @@
         }
 
         // 调用重构后的 downloadMedia
-        document.getElementById('download-btn').addEventListener('click', () => {
-            if(currentSingleData) downloadMedia(currentSingleData.music_url, (currentSingleData.title || 'audio') + '.mp3', true);
+        document.getElementById('download-btn').addEventListener('click', (e) => {
+            if(currentSingleData) downloadMedia(currentSingleData.music_url, (currentSingleData.title || 'audio') + '.mp3', true, e.currentTarget);
         });
-        document.getElementById('download-video-btn').addEventListener('click', () => {
-            if(currentSingleData && currentSingleData.video_url) downloadMedia(currentSingleData.video_url, (currentSingleData.title || 'video') + '.mp4', false);
+        document.getElementById('download-video-btn').addEventListener('click', (e) => {
+            if(currentSingleData && currentSingleData.video_url) downloadMedia(currentSingleData.video_url, (currentSingleData.title || 'video') + '.mp4', false, e.currentTarget);
         });
         function copySingleAudioUrl() {
             if(currentSingleData) copyToClipboard(currentSingleData.music_url);
@@ -741,15 +808,15 @@
                 // 绑定单独项的重编码下载方法
                 const audioBtn = div.querySelector('.dl-audio-btn');
                 if (audioBtn) {
-                    audioBtn.addEventListener('click', () => {
-                        downloadMedia(data.music_url, `${safeTitle}.mp3`, true);
+                    audioBtn.addEventListener('click', (e) => {
+                        downloadMedia(data.music_url, `${safeTitle}.mp3`, true, e.currentTarget);
                     });
                 }
                 
                 const videoBtn = div.querySelector('.dl-video-btn');
                 if (videoBtn && data.video_url) {
-                    videoBtn.addEventListener('click', () => {
-                        downloadMedia(data.video_url, `${safeTitle}.mp4`, false);
+                    videoBtn.addEventListener('click', (e) => {
+                        downloadMedia(data.video_url, `${safeTitle}.mp4`, false, e.currentTarget);
                     });
                 }
                 
@@ -786,10 +853,24 @@
             copyToClipboard(links);
         });
 
-        async function triggerBatchDownload(type) { 
+        async function triggerBatchDownload(type, btnEl = null) { 
             const isAudio = type === 'music_url';
             const validItems = batchResultsData.filter(i => i[type]);
             if(!validItems.length) return showToast('没有找到可下载的此类文件', 'error');
+            
+            const originalHTML = btnEl ? btnEl.innerHTML : null;
+            const originalDisabled = btnEl ? btnEl.disabled : false;
+
+            function setBtnProgress(text) {
+                if (!btnEl) return;
+                btnEl.disabled = true;
+                btnEl.innerHTML = `<span class="font-bold text-xs">${text}</span>`;
+            }
+            function restoreBtn() {
+                if (!btnEl) return;
+                btnEl.innerHTML = originalHTML;
+                btnEl.disabled = originalDisabled;
+            }
             
             showToast(`准备批量${isAudio ? '转码并下载 MP3' : '下载视频'}... ⚠️请务必允许浏览器弹出多个下载窗口！`, 'info');
             
@@ -801,14 +882,20 @@
                 const safeTitle = item.title.replace(/[\\/'"\n\r]/g, '').substring(0, 30);
                 const fn = `${safeTitle}_${i+1}${ext}`;
                 
+                setBtnProgress(`${isAudio ? '转码' : '下载'} ${i+1}/${validItems.length}`);
+                
                 try {
-                    // 修复：批量下载也使用带有代理穿透的 smartFetch
-                    const response = await smartFetch(item[type]);
+                    const response = await fetchWithProgress(item[type], (pct) => {
+                        setBtnProgress(`${isAudio ? '转码' : '下载'} ${i+1}/${validItems.length} · ${Math.round(pct)}%`);
+                    });
                     
                     let blob;
                     if (isAudio) {
                         const arrayBuffer = await response.arrayBuffer();
-                        blob = await convertToMp3Blob(arrayBuffer);
+                        setBtnProgress(`转码 ${i+1}/${validItems.length}`);
+                        blob = await convertToMp3Blob(arrayBuffer, (pct) => {
+                            setBtnProgress(`转码 ${i+1}/${validItems.length} · ${Math.round(pct)}%`);
+                        });
                     } else {
                         blob = await response.blob();
                     }
@@ -831,25 +918,23 @@
                 } catch (err) {
                     failCount++;
                     console.warn(`第 ${i+1} 个文件因为防盗链彻底阻断后台静默下载。`);
-                    // 砍掉 target=_blank 跳转。失败就是失败，不再跳新网页打扰用户。
                 }
                 
-                // 给代理服务器和浏览器留出喘息时间
                 await new Promise(r => setTimeout(r, 2000)); 
             }
             
+            restoreBtn();
             setTimeout(() => {
                 if (failCount === 0) {
                      showToast(`🎉 成功在后台静默触发了 ${count} 个下载任务！`, 'success');
                 } else {
-                     // 【修改点2】：修改批量解析失败时的总结提示，引导使用本地转换
                      showToast(`✅ 完成 ${count} 个任务。有 ${failCount} 个文件防盗链太强，请复制直链下载视频后，使用【本地转换】提取 MP3。`, 'info');
                 }
             }, 1000);
         }
 
-        document.getElementById('batch-download-audio').addEventListener('click', () => triggerBatchDownload('music_url'));
-        document.getElementById('batch-download-video').addEventListener('click', () => triggerBatchDownload('video_url'));
+        document.getElementById('batch-download-audio').addEventListener('click', (e) => triggerBatchDownload('music_url', e.currentTarget));
+        document.getElementById('batch-download-video').addEventListener('click', (e) => triggerBatchDownload('video_url', e.currentTarget));
 
         // ================= 弹窗视频播放器 =================
         const vModal = document.getElementById('video-modal');
