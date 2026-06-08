@@ -933,8 +933,8 @@
             }, 1000);
         }
 
-        document.getElementById('batch-download-audio').addEventListener('click', () => triggerBatchDownload('music_url'));
-        document.getElementById('batch-download-video').addEventListener('click', () => triggerBatchDownload('video_url'));
+        document.getElementById('batch-download-audio').addEventListener('click', (e) => triggerBatchDownload('music_url', e.currentTarget));
+        document.getElementById('batch-download-video').addEventListener('click', (e) => triggerBatchDownload('video_url', e.currentTarget));
 
         // ================= 弹窗视频播放器 =================
         const vModal = document.getElementById('video-modal');
