@@ -684,11 +684,11 @@
         }
 
         // 调用重构后的 downloadMedia
-        document.getElementById('download-btn').addEventListener('click', () => {
-            if(currentSingleData) downloadMedia(currentSingleData.music_url, (currentSingleData.title || 'audio') + '.mp3', true);
+        document.getElementById('download-btn').addEventListener('click', (e) => {
+            if(currentSingleData) downloadMedia(currentSingleData.music_url, (currentSingleData.title || 'audio') + '.mp3', true, e.currentTarget);
         });
-        document.getElementById('download-video-btn').addEventListener('click', () => {
-            if(currentSingleData && currentSingleData.video_url) downloadMedia(currentSingleData.video_url, (currentSingleData.title || 'video') + '.mp4', false);
+        document.getElementById('download-video-btn').addEventListener('click', (e) => {
+            if(currentSingleData && currentSingleData.video_url) downloadMedia(currentSingleData.video_url, (currentSingleData.title || 'video') + '.mp4', false, e.currentTarget);
         });
         function copySingleAudioUrl() {
             if(currentSingleData) copyToClipboard(currentSingleData.music_url);
