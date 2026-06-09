@@ -436,7 +436,6 @@
             const chunks = [];
             let received = 0;
             let lastTick = 0;
-            let estimatedPercent = 0;
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -449,17 +448,13 @@
                     if (contentLength) {
                         onProgress((received / contentLength) * 100, received, contentLength);
                     } else {
-                        // 有些平台不会返回 Content-Length，无法得到真实总大小。
-                        // 这里按已接收字节生成一个持续增长的百分比，完成时再精确到 100%。
-                        const byteBasedPercent = (received / (received + 12 * 1024 * 1024)) * 92;
-                        const chunkBasedStep = Math.max(0.7, value.length / (512 * 1024));
-                        estimatedPercent = Math.min(95, Math.max(estimatedPercent + chunkBasedStep, byteBasedPercent));
-                        onProgress(estimatedPercent, received, 0);
+                        // 未知总大小：用已接收 MB 实时反馈
+                        onProgress(null, received, 0);
                     }
                 }
             }
             if (contentLength) onProgress(100, received, contentLength);
-            else onProgress(100, received, 0);
+            else onProgress(null, received, 0);
 
             // 将 chunks 合并成新的 Response
             const blob = new Blob(chunks);
