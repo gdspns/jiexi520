@@ -542,8 +542,13 @@
                 setBtnProgress('下载 0%', 0);
 
                 // 带进度追踪下载
-                const response = await fetchWithProgress(url, (pct) => {
-                    setBtnProgress(`下载 ${Math.round(pct)}%`, pct);
+                const response = await fetchWithProgress(url, (pct, received) => {
+                    if (pct === null) {
+                        const mb = (received / 1048576).toFixed(2);
+                        setBtnProgress(`下载 ${mb}MB`, null);
+                    } else {
+                        setBtnProgress(`下载 ${Math.round(pct)}%`, pct);
+                    }
                 });
 
                 let blob;
@@ -895,8 +900,13 @@
                 setBtnProgress(`${isAudio ? '转码' : '下载'} ${i+1}/${validItems.length}`);
                 
                 try {
-                    const response = await fetchWithProgress(item[type], (pct) => {
-                        setBtnProgress(`${isAudio ? '转码' : '下载'} ${i+1}/${validItems.length} · ${Math.round(pct)}%`);
+                    const response = await fetchWithProgress(item[type], (pct, received) => {
+                        if (pct === null) {
+                            const mb = (received / 1048576).toFixed(2);
+                            setBtnProgress(`${isAudio ? '抓取' : '下载'} ${i+1}/${validItems.length} · ${mb}MB`);
+                        } else {
+                            setBtnProgress(`${isAudio ? '抓取' : '下载'} ${i+1}/${validItems.length} · ${Math.round(pct)}%`);
+                        }
                     });
                     
                     let blob;
