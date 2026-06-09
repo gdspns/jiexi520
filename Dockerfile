@@ -45,9 +45,9 @@ RUN apt-get update \
 ENV YOUTUBE_DL_PATH=/usr/local/bin/yt-dlp
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/.output ./.output
 COPY --from=builder /app/package.json ./package.json
 
 EXPOSE 3000
 
-CMD ["node", "dist/server/index.mjs"]
+CMD ["node", ".output/server/index.mjs"]
