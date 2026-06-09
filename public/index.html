@@ -432,19 +432,29 @@
             if (!response.body || !onProgress) return response;
 
             const contentLength = +(response.headers.get('Content-Length') || 0);
-            if (!contentLength) return response;
-
             const reader = response.body.getReader();
             const chunks = [];
             let received = 0;
+            let lastTick = 0;
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
                 chunks.push(value);
                 received += value.length;
-                onProgress((received / contentLength) * 100);
+                const now = performance.now();
+                if (now - lastTick > 80 || !contentLength) {
+                    lastTick = now;
+                    if (contentLength) {
+                        onProgress((received / contentLength) * 100, received, contentLength);
+                    } else {
+                        // 未知总大小：用已接收 MB 实时反馈
+                        onProgress(null, received, 0);
+                    }
+                }
             }
+            if (contentLength) onProgress(100, received, contentLength);
+            else onProgress(null, received, 0);
 
             // 将 chunks 合并成新的 Response
             const blob = new Blob(chunks);
