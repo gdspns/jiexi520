@@ -432,19 +432,29 @@
             if (!response.body || !onProgress) return response;
 
             const contentLength = +(response.headers.get('Content-Length') || 0);
-            if (!contentLength) return response;
-
             const reader = response.body.getReader();
             const chunks = [];
             let received = 0;
+            let lastTick = 0;
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
                 chunks.push(value);
                 received += value.length;
-                onProgress((received / contentLength) * 100);
+                const now = performance.now();
+                if (now - lastTick > 80 || !contentLength) {
+                    lastTick = now;
+                    if (contentLength) {
+                        onProgress((received / contentLength) * 100, received, contentLength);
+                    } else {
+                        // 未知总大小：用已接收 MB 实时反馈
+                        onProgress(null, received, 0);
+                    }
+                }
             }
+            if (contentLength) onProgress(100, received, contentLength);
+            else onProgress(null, received, 0);
 
             // 将 chunks 合并成新的 Response
             const blob = new Blob(chunks);
@@ -532,8 +542,13 @@
                 setBtnProgress('下载 0%', 0);
 
                 // 带进度追踪下载
-                const response = await fetchWithProgress(url, (pct) => {
-                    setBtnProgress(`下载 ${Math.round(pct)}%`, pct);
+                const response = await fetchWithProgress(url, (pct, received) => {
+                    if (pct === null) {
+                        const mb = (received / 1048576).toFixed(2);
+                        setBtnProgress(`下载 ${mb}MB`, null);
+                    } else {
+                        setBtnProgress(`下载 ${Math.round(pct)}%`, pct);
+                    }
                 });
 
                 let blob;
@@ -885,8 +900,13 @@
                 setBtnProgress(`${isAudio ? '转码' : '下载'} ${i+1}/${validItems.length}`);
                 
                 try {
-                    const response = await fetchWithProgress(item[type], (pct) => {
-                        setBtnProgress(`${isAudio ? '转码' : '下载'} ${i+1}/${validItems.length} · ${Math.round(pct)}%`);
+                    const response = await fetchWithProgress(item[type], (pct, received) => {
+                        if (pct === null) {
+                            const mb = (received / 1048576).toFixed(2);
+                            setBtnProgress(`${isAudio ? '抓取' : '下载'} ${i+1}/${validItems.length} · ${mb}MB`);
+                        } else {
+                            setBtnProgress(`${isAudio ? '抓取' : '下载'} ${i+1}/${validItems.length} · ${Math.round(pct)}%`);
+                        }
                     });
                     
                     let blob;
