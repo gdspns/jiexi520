@@ -812,6 +812,34 @@ function AdminPage() {
           )}
         </div>
       </main>
+
+      {/* 删除确认对话框 */}
+      {confirmOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60" onClick={() => { setConfirmOpen(false); setConfirmTarget(null); }} />
+          <div className="relative z-10 w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-slate-100 mb-2">确认删除</h3>
+            <p className="text-sm text-slate-400 mb-6">
+              确定删除订单 <span className="font-mono text-pink-300">{confirmTarget?.orderNo}</span>？此操作无法撤销。
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => { setConfirmOpen(false); setConfirmTarget(null); }}
+                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium"
+              >
+                取消
+              </button>
+              <button
+                onClick={executeDeleteOrder}
+                disabled={busy === confirmTarget?.id}
+                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm font-semibold disabled:opacity-50"
+              >
+                {busy === confirmTarget?.id ? "删除中..." : "确认删除"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
