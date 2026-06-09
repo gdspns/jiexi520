@@ -97,6 +97,10 @@ function AdminPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
 
+  // 确认对话框状态
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTarget, setConfirmTarget] = useState<{ id: string; orderNo: string } | null>(null);
+
   const reloadProducts = async () => {
     setLoadingProds(true);
     try {
