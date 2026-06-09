@@ -192,16 +192,23 @@ function AdminPage() {
     catch (e: any) { alert(e?.message || "删除失败"); }
   };
 
-  const onDeleteOrder = async (id: string, orderNo: string) => {
-    if (!confirm(`确定删除订单 ${orderNo}？此操作无法撤销。`)) return;
-    setBusy(id);
+  const onDeleteOrder = (id: string, orderNo: string) => {
+    setConfirmTarget({ id, orderNo });
+    setConfirmOpen(true);
+  };
+
+  const executeDeleteOrder = async () => {
+    if (!confirmTarget) return;
+    setBusy(confirmTarget.id);
     try {
-      await removeOrder({ data: { id } });
-      setOrders((arr) => arr.filter((o) => o.id !== id));
+      await removeOrder({ data: { id: confirmTarget.id } });
+      setOrders((arr) => arr.filter((o) => o.id !== confirmTarget.id));
     } catch (e: any) {
       alert(e?.message || "删除失败");
     } finally {
       setBusy(null);
+      setConfirmOpen(false);
+      setConfirmTarget(null);
     }
   };
 
