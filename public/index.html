@@ -1104,6 +1104,16 @@
       let currentUser = null;
       let isAdmin = false;
       let userCredits = null; // null = 未知/未登录
+      const CREDITS_CACHE_KEY = 'yyws_credits_cache_v1';
+      try {
+        const cached = JSON.parse(localStorage.getItem(CREDITS_CACHE_KEY) || 'null');
+        if (cached && typeof cached.credits === 'number') {
+          userCredits = cached.credits;
+          isAdmin = !!cached.isAdmin;
+          window.__userCredits = userCredits;
+          window.__isAdmin = isAdmin;
+        }
+      } catch {}
 
       const bar = document.getElementById("auth-bar");
       const btnStyle = "padding:6px 14px;border-radius:8px;font-size:13px;font-weight:600;border:1px solid #475569;background:rgba(15,23,42,0.7);color:#f8fafc;cursor:pointer;backdrop-filter:blur(8px);";
@@ -1152,31 +1162,60 @@
         bar.appendChild(out);
       }
 
+      let _refreshInflight = null;
       async function refreshAuth() {
-        const { data: sessionData } = await sb.auth.getSession();
-        currentUser = sessionData.session?.user || null;
-        if (currentUser) {
-          const { data: userData, error } = await sb.auth.getUser();
-          if (!error && userData.user) currentUser = userData.user;
-        }
-        isAdmin = false;
-        userCredits = null;
-        if (currentUser) {
-          const { data: roles } = await sb.from("user_roles").select("role").eq("user_id", currentUser.id);
-          isAdmin = !!roles?.some(r => r.role === "admin");
-          const { data: prof } = await sb.from("profiles").select("credits").eq("id", currentUser.id).maybeSingle();
-          userCredits = prof?.credits ?? 0;
-        }
-        window.__isAdmin = isAdmin;
-        window.__userCredits = userCredits;
-        renderBar();
+        if (_refreshInflight) return _refreshInflight;
+        _refreshInflight = (async () => {
+          const { data: sessionData } = await sb.auth.getSession();
+          currentUser = sessionData.session?.user || null;
+          if (!currentUser) {
+            isAdmin = false;
+            userCredits = null;
+            window.__isAdmin = false;
+            window.__userCredits = null;
+            try { localStorage.removeItem(CREDITS_CACHE_KEY); } catch {}
+            renderBar();
+            return;
+          }
+          // 先用缓存立即渲染（避免顶部出现"—"再变数字的闪烁）
+          renderBar();
+          // 并行拉取角色和余额
+          const [rolesRes, profRes] = await Promise.all([
+            sb.from("user_roles").select("role").eq("user_id", currentUser.id),
+            sb.from("profiles").select("credits").eq("id", currentUser.id).maybeSingle(),
+          ]);
+          isAdmin = !!rolesRes.data?.some(r => r.role === "admin");
+          userCredits = profRes.data?.credits ?? 0;
+          window.__isAdmin = isAdmin;
+          window.__userCredits = userCredits;
+          try { localStorage.setItem(CREDITS_CACHE_KEY, JSON.stringify({ credits: userCredits, isAdmin, uid: currentUser.id })); } catch {}
+          renderBar();
+        })().finally(() => { _refreshInflight = null; });
+        return _refreshInflight;
       }
-      sb.auth.onAuthStateChange((_event, session) => {
-        currentUser = session?.user || null;
+      // 立即用缓存渲染一次（同步），随后异步刷新
+      {
+        const { data: sessionData } = sb.auth.getSession ? {} : {};
+      }
+      sb.auth.getSession().then(({ data }) => {
+        currentUser = data.session?.user || null;
         renderBar();
-        setTimeout(refreshAuth, 0);
       });
-      refreshAuth();
+      sb.auth.onAuthStateChange((event, session) => {
+        const newUser = session?.user || null;
+        const changed = (newUser?.id || null) !== (currentUser?.id || null);
+        currentUser = newUser;
+        if (changed) {
+          // 用户切换，缓存失效
+          try { localStorage.removeItem(CREDITS_CACHE_KEY); } catch {}
+          userCredits = null;
+          isAdmin = false;
+        }
+        renderBar();
+        if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION') {
+          refreshAuth();
+        }
+      });
 
       function requireLogin(actionLabel) {
         if (currentUser) return true;
