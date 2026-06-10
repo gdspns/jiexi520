@@ -535,6 +535,61 @@
                 btnEl.disabled = originalDisabled;
             }
 
+            function promptMobileSave(file) {
+                return new Promise((resolve) => {
+                    const blobUrl = window.URL.createObjectURL(file);
+                    const overlay = document.createElement('div');
+                    overlay.className = 'fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4';
+                    overlay.innerHTML = `
+                        <div class="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl text-center">
+                            <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-primary-500/20 text-primary-300">
+                                <i class="fa-solid ${isAudio ? 'fa-music' : 'fa-video'}"></i>
+                            </div>
+                            <h3 class="text-lg font-bold text-white mb-2">文件已准备好</h3>
+                            <p class="text-sm text-slate-300 mb-4">${/iPhone|iPad|iPod/i.test(navigator.userAgent) && !isAudio ? '请点下面按钮，在弹出的菜单里选择“存储视频/保存到相册”。' : '请点下面按钮保存到手机。'}</p>
+                            <div class="space-y-2">
+                                <button type="button" class="mobile-share-btn w-full rounded-xl bg-primary-600 py-3 font-bold text-white">${isAudio ? '保存音频到手机' : '保存视频到相册'}</button>
+                                <button type="button" class="mobile-download-btn w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100">浏览器下载</button>
+                                <button type="button" class="mobile-cancel-btn w-full py-2 text-sm text-slate-400">取消</button>
+                            </div>
+                        </div>`;
+                    document.body.appendChild(overlay);
+                    const finish = (saved) => {
+                        overlay.remove();
+                        setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+                        resolve(saved);
+                    };
+                    overlay.querySelector('.mobile-share-btn').addEventListener('click', async () => {
+                        try {
+                            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                                await navigator.share({ files: [file], title: file.name });
+                                finish(true);
+                                return;
+                            }
+                        } catch (err) {
+                            if (err && err.name === 'AbortError') { finish(false); return; }
+                        }
+                        const a = document.createElement('a');
+                        a.href = blobUrl;
+                        a.download = file.name;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        finish(true);
+                    });
+                    overlay.querySelector('.mobile-download-btn').addEventListener('click', () => {
+                        const a = document.createElement('a');
+                        a.href = blobUrl;
+                        a.download = file.name;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        finish(true);
+                    });
+                    overlay.querySelector('.mobile-cancel-btn').addEventListener('click', () => finish(false));
+                });
+            }
+
             try {
                 if (isAudio) showToast('正在后台高速抓取并转码为纯正 MP3，请耐心等待切勿关闭页面...', 'info');
                 else showToast('正在后台高速拉取无水印视频，请稍候...', 'info');
@@ -562,26 +617,15 @@
                     blob = await response.blob();
                 }
 
-                // 移动端：尝试调用系统分享
+                // 移动端：下载完成后要求用户再点一次按钮，确保 iOS/安卓浏览器允许保存到相册/手机
                 const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-                if (isMobile && !isAudio) {
-                    try {
-                        const file = new File([blob], fileName, { type: blob.type || 'video/mp4' });
-                        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                            showToast('📲 请在弹出的菜单中点击【存储视频 / 保存到相册】', 'info');
-                            await navigator.share({ files: [file], title: fileName });
-                            showToast('✅ 已调起系统保存，请在相册中查看', 'success');
-                            restoreBtn();
-                            return;
-                        }
-                    } catch (shareErr) {
-                        if (shareErr && shareErr.name === 'AbortError') {
-                            showToast('已取消保存', 'info');
-                            restoreBtn();
-                            return;
-                        }
-                        console.warn('系统分享失败，回退浏览器下载', shareErr);
-                    }
+                if (isMobile) {
+                    const fileType = isAudio ? 'audio/mpeg' : 'video/mp4';
+                    const file = new File([blob], fileName, { type: blob.type || fileType });
+                    const saved = await promptMobileSave(file);
+                    showToast(saved ? (isAudio ? '✅ 音频已开始保存到手机' : '✅ 已调起保存，请到相册或下载列表查看') : '已取消保存', saved ? 'success' : 'info');
+                    restoreBtn();
+                    return;
                 }
 
                 const blobUrl = window.URL.createObjectURL(blob);
