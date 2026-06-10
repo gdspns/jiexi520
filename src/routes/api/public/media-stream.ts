@@ -8,6 +8,12 @@ const CORS = {
     "Content-Length, Content-Range, Accept-Ranges, Content-Type, Content-Disposition",
 };
 
+function attachmentName(name: string | null, fallback: string) {
+  const cleaned = (name || fallback).replace(/[\\/"\r\n]/g, "").trim().slice(0, 120) || fallback;
+  const ascii = cleaned.replace(/[^\x20-\x7E]/g, "_");
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(cleaned)}`;
+}
+
 function isSupportedSource(url: string) {
   const u = url.toLowerCase();
   return (
@@ -146,6 +152,8 @@ async function handle(request: Request): Promise<Response> {
   const reqUrl = new URL(request.url);
   const target = (reqUrl.searchParams.get("url") || "").trim();
   const type = reqUrl.searchParams.get("type") === "audio" ? "audio" : "video";
+  const shouldDownload = reqUrl.searchParams.get("download") === "1";
+  const filename = reqUrl.searchParams.get("filename");
   if (!/^https?:\/\//i.test(target) || target.length > 1000 || !isSupportedSource(target)) {
     return new Response("Invalid url", { status: 400, headers: CORS });
   }
@@ -163,6 +171,7 @@ async function handle(request: Request): Promise<Response> {
     headers.set("Content-Type", type === "audio" ? "audio/mp4" : "video/mp4");
     headers.set("Cache-Control", "no-store");
     headers.set("Accept-Ranges", "none");
+    if (shouldDownload) headers.set("Content-Disposition", attachmentName(filename, type === "audio" ? "audio.m4a" : "video.mp4"));
     return new Response(null, { status: 200, headers });
   }
 
@@ -280,6 +289,7 @@ async function handle(request: Request): Promise<Response> {
   headers.set("Content-Type", type === "audio" ? "audio/mp4" : "video/mp4");
   headers.set("Cache-Control", "no-store");
   headers.set("Accept-Ranges", "none");
+  if (shouldDownload) headers.set("Content-Disposition", attachmentName(filename, type === "audio" ? "audio.m4a" : "video.mp4"));
   return new Response(body, { status: 200, headers });
 }
 

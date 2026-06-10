@@ -74,12 +74,20 @@ const CORS = {
   "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
   "Access-Control-Allow-Headers": "Range, Content-Type",
   "Access-Control-Expose-Headers":
-    "Content-Length, Content-Range, Accept-Ranges, Content-Type",
+    "Content-Length, Content-Range, Accept-Ranges, Content-Type, Content-Disposition",
 };
+
+function attachmentName(name: string | null, fallback: string) {
+  const cleaned = (name || fallback).replace(/[\\/"\r\n]/g, "").trim().slice(0, 120) || fallback;
+  const ascii = cleaned.replace(/[^\x20-\x7E]/g, "_");
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(cleaned)}`;
+}
 
 async function handle(request: Request): Promise<Response> {
   const reqUrl = new URL(request.url);
   const target = reqUrl.searchParams.get("url");
+  const shouldDownload = reqUrl.searchParams.get("download") === "1";
+  const filename = reqUrl.searchParams.get("filename");
   if (!target) {
     return new Response("Missing url", { status: 400, headers: CORS });
   }
@@ -137,6 +145,9 @@ async function handle(request: Request): Promise<Response> {
   }
   if (!respHeaders.has("content-type")) {
     respHeaders.set("content-type", "application/octet-stream");
+  }
+  if (shouldDownload) {
+    respHeaders.set("Content-Disposition", attachmentName(filename, "download"));
   }
   respHeaders.set("Cache-Control", "public, max-age=3600");
 
