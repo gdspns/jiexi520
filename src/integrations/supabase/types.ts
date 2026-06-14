@@ -32,6 +32,39 @@ export type Database = {
         }
         Relationships: []
       }
+      parse_logs: {
+        Row: {
+          created_at: string
+          id: string
+          message: string
+          platform: string
+          proxy_on: boolean
+          status: string
+          type: string
+          url: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          message?: string
+          platform?: string
+          proxy_on?: boolean
+          status?: string
+          type?: string
+          url?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          message?: string
+          platform?: string
+          proxy_on?: boolean
+          status?: string
+          type?: string
+          url?: string
+        }
+        Relationships: []
+      }
       payment_config: {
         Row: {
           alipay_appid: string

@@ -148,6 +148,33 @@ async function readProxySetting() {
   }
 }
 
+async function writeParseLog(row: {
+  platform: string;
+  type: string;
+  proxy_on: boolean;
+  url: string;
+  status: string;
+  message?: string;
+}) {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return;
+  try {
+    const { createClient } = await import("@supabase/supabase-js");
+    const sb = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+    await sb.from("parse_logs").insert({
+      platform: row.platform || "",
+      type: row.type || "",
+      proxy_on: row.proxy_on,
+      url: (row.url || "").slice(0, 500),
+      status: row.status,
+      message: (row.message || "").slice(0, 1000),
+    });
+  } catch (err) {
+    console.error("[api/media-stream] failed to write parse_log", err);
+  }
+}
+
 async function handle(request: Request): Promise<Response> {
   const reqUrl = new URL(request.url);
   const target = (reqUrl.searchParams.get("url") || "").trim();
@@ -188,6 +215,14 @@ async function handle(request: Request): Promise<Response> {
   console.log(
     `[api/media-stream] parse start proxy=${proxy ? "on" : "off"} platform=${platform || "unknown"} type=${type}`,
   );
+  void writeParseLog({
+    platform: platform || "unknown",
+    type,
+    proxy_on: !!proxy,
+    url: target,
+    status: "start",
+    message: "",
+  });
   const strategies = buildPlatformStrategies(platform, UA_DESKTOP, UA_MOBILE);
   const cookieArgSets = platform ? await buildCookieArgSets(platform) : [];
   const attempts = [
@@ -243,11 +278,36 @@ async function handle(request: Request): Promise<Response> {
   }
   if (!chosen) {
     if (needsCookies && cookieArgSets.length === 0) {
+      void writeParseLog({
+        platform: platform || "unknown",
+        type,
+        proxy_on: !!proxy,
+        url: target,
+        status: "need_cookies",
+        message: lastErr.slice(0, 800),
+      });
       return new Response(`${platform || "Platform"} login cookies required`, { status: 502, headers: CORS });
     }
     console.error("[api/media-stream] all strategies failed", lastErr.slice(0, 800));
+    void writeParseLog({
+      platform: platform || "unknown",
+      type,
+      proxy_on: !!proxy,
+      url: target,
+      status: "failed",
+      message: lastErr.slice(0, 800),
+    });
     return new Response("stream unavailable", { status: 502, headers: CORS });
   }
+
+  void writeParseLog({
+    platform: platform || "unknown",
+    type,
+    proxy_on: !!proxy,
+    url: target,
+    status: "ok",
+    message: chosen.name,
+  });
 
   const args = [
     "-f", format,

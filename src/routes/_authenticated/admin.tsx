@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig } from "@/lib/admin.functions";
+import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig, listParseLogs } from "@/lib/admin.functions";
 import { deleteOrder, getPaymentConfig, listOrdersAdmin, listProductsAdmin, setPaymentConfig, upsertProduct, deleteProduct } from "@/lib/payment.functions";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -20,7 +20,7 @@ export const Route = createFileRoute("/_authenticated/admin")({
   ),
 });
 
-type MenuKey = "users" | "settings" | "products" | "orders";
+type MenuKey = "users" | "settings" | "products" | "orders" | "logs";
 
 function AdminPage() {
   const navigate = useNavigate();
@@ -313,6 +313,7 @@ function AdminPage() {
   const menuItems: { key: MenuKey; label: string; icon: string }[] = [
     { key: "users", label: "用户管理", icon: "👤" },
     { key: "settings", label: "系统配置", icon: "⚙️" },
+    { key: "logs", label: "解析日志", icon: "📜" },
   ];
 
   const switchMenu = (key: MenuKey) => {
@@ -394,6 +395,7 @@ function AdminPage() {
             {activeMenu === "settings" && "系统配置"}
             {activeMenu === "products" && "充值商品管理"}
             {activeMenu === "orders" && "订单管理"}
+            {activeMenu === "logs" && "解析日志"}
           </h2>
         </header>
 
@@ -810,6 +812,9 @@ function AdminPage() {
               )}
             </section>
           )}
+
+          {/* ========== 解析日志 ========== */}
+          {activeMenu === "logs" && <ParseLogsPanel />}
         </div>
       </main>
 
@@ -841,5 +846,87 @@ function AdminPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function ParseLogsPanel() {
+  const fetchLogs = useServerFn(listParseLogs);
+  const { data, isLoading, refetch, isFetching, error } = useQuery({
+    queryKey: ["parse_logs"],
+    queryFn: () => fetchLogs(),
+    refetchInterval: 10_000,
+  });
+  const logs = (data || []) as Array<{
+    id: string; platform: string; type: string; proxy_on: boolean;
+    url: string; status: string; message: string; created_at: string;
+  }>;
+  const statusStyle = (s: string) =>
+    s === "ok" ? "bg-emerald-500/20 text-emerald-300" :
+    s === "start" ? "bg-slate-500/20 text-slate-300" :
+    s === "need_cookies" ? "bg-amber-500/20 text-amber-300" :
+    "bg-red-500/20 text-red-300";
+  return (
+    <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-base font-bold">解析日志</h2>
+          <p className="text-xs text-slate-400 mt-1">
+            最近 200 条国外平台解析记录（每 10 秒自动刷新）。proxy=on 表示通过后台代理；status 包含 start / ok / failed / need_cookies。
+          </p>
+        </div>
+        <button
+          onClick={() => refetch()}
+          disabled={isFetching}
+          className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold disabled:opacity-50"
+        >
+          {isFetching ? "刷新中..." : "🔄 刷新"}
+        </button>
+      </div>
+      {error ? (
+        <p className="text-sm text-red-400">{(error as Error).message}</p>
+      ) : isLoading ? (
+        <p className="text-slate-400 text-sm">加载中...</p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-slate-800">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-900 text-slate-400">
+              <tr>
+                <th className="text-left px-3 py-2">时间</th>
+                <th className="text-left px-3 py-2">平台</th>
+                <th className="text-left px-3 py-2">类型</th>
+                <th className="text-left px-3 py-2">代理</th>
+                <th className="text-left px-3 py-2">状态</th>
+                <th className="text-left px-3 py-2">URL</th>
+                <th className="text-left px-3 py-2">备注</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((l) => (
+                <tr key={l.id} className="border-t border-slate-800 hover:bg-slate-900/50 align-top">
+                  <td className="px-3 py-2 text-slate-400 text-xs whitespace-nowrap">
+                    {new Date(l.created_at).toLocaleString("zh-CN")}
+                  </td>
+                  <td className="px-3 py-2 text-slate-200">{l.platform || "—"}</td>
+                  <td className="px-3 py-2 text-slate-300">{l.type || "—"}</td>
+                  <td className="px-3 py-2">
+                    <span className={`px-2 py-0.5 rounded text-xs ${l.proxy_on ? "bg-blue-500/20 text-blue-300" : "bg-slate-500/20 text-slate-400"}`}>
+                      {l.proxy_on ? "on" : "off"}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    <span className={`px-2 py-0.5 rounded text-xs ${statusStyle(l.status)}`}>{l.status}</span>
+                  </td>
+                  <td className="px-3 py-2 text-slate-300 text-xs max-w-[280px] truncate" title={l.url}>{l.url}</td>
+                  <td className="px-3 py-2 text-slate-400 text-xs max-w-[320px] truncate" title={l.message}>{l.message || "—"}</td>
+                </tr>
+              ))}
+              {logs.length === 0 && (
+                <tr><td colSpan={7} className="text-center text-slate-500 py-8">暂无日志</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
