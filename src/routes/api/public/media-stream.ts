@@ -178,9 +178,6 @@ async function handle(request: Request): Promise<Response> {
   const { spawn } = await import("node:child_process");
   const proxy = await readProxySetting();
   const referer = pickRefererForSource(target);
-  console.log(
-    `[api/media-stream] parse start proxy=${proxy ? "on" : "off"} platform=${platform || "unknown"} type=${type}`,
-  );
   const format =
     type === "audio" ? "bestaudio[ext=m4a]/bestaudio/best[ext=mp4]/best" : "best[ext=mp4]/best";
   const UA_DESKTOP =
@@ -188,6 +185,9 @@ async function handle(request: Request): Promise<Response> {
   const UA_MOBILE =
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
   const platform = platformKey(target);
+  console.log(
+    `[api/media-stream] parse start proxy=${proxy ? "on" : "off"} platform=${platform || "unknown"} type=${type}`,
+  );
   const strategies = buildPlatformStrategies(platform, UA_DESKTOP, UA_MOBILE);
   const cookieArgSets = platform ? await buildCookieArgSets(platform) : [];
   const attempts = [
