@@ -178,6 +178,9 @@ async function handle(request: Request): Promise<Response> {
   const { spawn } = await import("node:child_process");
   const proxy = await readProxySetting();
   const referer = pickRefererForSource(target);
+  console.log(
+    `[api/media-stream] parse start proxy=${proxy ? "on" : "off"} platform=${platform || "unknown"} type=${type}`,
+  );
   const format =
     type === "audio" ? "bestaudio[ext=m4a]/bestaudio/best[ext=mp4]/best" : "best[ext=mp4]/best";
   const UA_DESKTOP =
