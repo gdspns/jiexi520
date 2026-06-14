@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig } from "@/lib/admin.functions";
+import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig, listParseLogs } from "@/lib/admin.functions";
 import { deleteOrder, getPaymentConfig, listOrdersAdmin, listProductsAdmin, setPaymentConfig, upsertProduct, deleteProduct } from "@/lib/payment.functions";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -20,7 +20,7 @@ export const Route = createFileRoute("/_authenticated/admin")({
   ),
 });
 
-type MenuKey = "users" | "settings" | "products" | "orders";
+type MenuKey = "users" | "settings" | "products" | "orders" | "logs";
 
 function AdminPage() {
   const navigate = useNavigate();
@@ -313,6 +313,7 @@ function AdminPage() {
   const menuItems: { key: MenuKey; label: string; icon: string }[] = [
     { key: "users", label: "用户管理", icon: "👤" },
     { key: "settings", label: "系统配置", icon: "⚙️" },
+    { key: "logs", label: "解析日志", icon: "📜" },
   ];
 
   const switchMenu = (key: MenuKey) => {
@@ -394,6 +395,7 @@ function AdminPage() {
             {activeMenu === "settings" && "系统配置"}
             {activeMenu === "products" && "充值商品管理"}
             {activeMenu === "orders" && "订单管理"}
+            {activeMenu === "logs" && "解析日志"}
           </h2>
         </header>
 
