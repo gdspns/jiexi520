@@ -812,6 +812,9 @@ function AdminPage() {
               )}
             </section>
           )}
+
+          {/* ========== 解析日志 ========== */}
+          {activeMenu === "logs" && <ParseLogsPanel />}
         </div>
       </main>
 
