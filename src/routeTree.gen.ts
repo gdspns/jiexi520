@@ -21,6 +21,7 @@ import { Route as ApiRechargeCreateRouteImport } from './routes/api/recharge/cre
 import { Route as ApiPublicXunhupayNotifyRouteImport } from './routes/api/public/xunhupay-notify'
 import { Route as ApiPublicMediaStreamRouteImport } from './routes/api/public/media-stream'
 import { Route as ApiPublicMediaProxyRouteImport } from './routes/api/public/media-proxy'
+import { Route as ApiPublicAuthTokenRouteImport } from './routes/api/public/auth-token'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -81,6 +82,11 @@ const ApiPublicMediaProxyRoute = ApiPublicMediaProxyRouteImport.update({
   path: '/api/public/media-proxy',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicAuthTokenRoute = ApiPublicAuthTokenRouteImport.update({
+  id: '/api/public/auth-token',
+  path: '/api/public/auth-token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -88,6 +94,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AuthenticatedAdminRoute
   '/api/config': typeof ApiConfigRoute
   '/api/parse': typeof ApiParseRoute
+  '/api/public/auth-token': typeof ApiPublicAuthTokenRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
   '/api/public/xunhupay-notify': typeof ApiPublicXunhupayNotifyRoute
@@ -101,6 +108,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AuthenticatedAdminRoute
   '/api/config': typeof ApiConfigRoute
   '/api/parse': typeof ApiParseRoute
+  '/api/public/auth-token': typeof ApiPublicAuthTokenRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
   '/api/public/xunhupay-notify': typeof ApiPublicXunhupayNotifyRoute
@@ -116,6 +124,7 @@ export interface FileRoutesById {
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
   '/api/config': typeof ApiConfigRoute
   '/api/parse': typeof ApiParseRoute
+  '/api/public/auth-token': typeof ApiPublicAuthTokenRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
   '/api/public/xunhupay-notify': typeof ApiPublicXunhupayNotifyRoute
@@ -131,6 +140,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/api/config'
     | '/api/parse'
+    | '/api/public/auth-token'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
     | '/api/public/xunhupay-notify'
@@ -144,6 +154,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/api/config'
     | '/api/parse'
+    | '/api/public/auth-token'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
     | '/api/public/xunhupay-notify'
@@ -158,6 +169,7 @@ export interface FileRouteTypes {
     | '/_authenticated/admin'
     | '/api/config'
     | '/api/parse'
+    | '/api/public/auth-token'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
     | '/api/public/xunhupay-notify'
@@ -172,6 +184,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   ApiConfigRoute: typeof ApiConfigRoute
   ApiParseRoute: typeof ApiParseRoute
+  ApiPublicAuthTokenRoute: typeof ApiPublicAuthTokenRoute
   ApiPublicMediaProxyRoute: typeof ApiPublicMediaProxyRoute
   ApiPublicMediaStreamRoute: typeof ApiPublicMediaStreamRoute
   ApiPublicXunhupayNotifyRoute: typeof ApiPublicXunhupayNotifyRoute
@@ -266,6 +279,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicMediaProxyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/auth-token': {
+      id: '/api/public/auth-token'
+      path: '/api/public/auth-token'
+      fullPath: '/api/public/auth-token'
+      preLoaderRoute: typeof ApiPublicAuthTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -287,6 +307,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   ApiConfigRoute: ApiConfigRoute,
   ApiParseRoute: ApiParseRoute,
+  ApiPublicAuthTokenRoute: ApiPublicAuthTokenRoute,
   ApiPublicMediaProxyRoute: ApiPublicMediaProxyRoute,
   ApiPublicMediaStreamRoute: ApiPublicMediaStreamRoute,
   ApiPublicXunhupayNotifyRoute: ApiPublicXunhupayNotifyRoute,
@@ -297,3 +318,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
