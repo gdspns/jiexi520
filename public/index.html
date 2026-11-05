@@ -950,7 +950,7 @@
 
         function renderSingleResult(data) {
             document.getElementById('video-title').textContent = data.title;
-            document.getElementById('video-thumbnail').src = data.cover;
+            document.getElementById('video-thumbnail').src = proxify(data.cover);
             document.getElementById('platform-name').textContent = data.platform;
             
             const watchBtn = document.getElementById('watch-video-btn');
@@ -1072,7 +1072,7 @@
                 
                 div.innerHTML = `
                     <div class="w-12 h-12 rounded bg-slate-700 flex-shrink-0 overflow-hidden relative">
-                        <img src="${data.cover}" class="w-full h-full object-cover">
+                        <img src="${proxify(data.cover)}" class="w-full h-full object-cover">
                     </div>
                     <div class="flex-grow min-w-0">
                         <h4 class="text-white text-sm font-medium truncate">${data.title}</h4>
