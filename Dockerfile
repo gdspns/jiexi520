@@ -20,7 +20,9 @@ RUN npm install -g bun@1.3.3
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN bun run build
+RUN mkdir -p public/vendor \
+  && cp node_modules/@supabase/supabase-js/dist/umd/supabase.js public/vendor/supabase.js \
+  && bun run build
 
 FROM node:22-bookworm-slim AS runner
 
