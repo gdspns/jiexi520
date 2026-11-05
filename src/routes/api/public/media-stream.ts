@@ -197,7 +197,7 @@ async function handle(request: Request): Promise<Response> {
     const headers = new Headers(CORS);
     headers.set("Content-Type", type === "audio" ? "audio/mp4" : "video/mp4");
     headers.set("Cache-Control", "no-store");
-    headers.set("Accept-Ranges", "none");
+    headers.set("Accept-Ranges", "bytes");
     if (shouldDownload) headers.set("Content-Disposition", attachmentName(filename, type === "audio" ? "audio.m4a" : "video.mp4"));
     return new Response(null, { status: 200, headers });
   }
@@ -236,9 +236,12 @@ async function handle(request: Request): Promise<Response> {
     ),
   ];
 
-  // 先用 --simulate 探测哪个策略能取到媒体，再用同样参数拉流，避免响应头已发送但拉流失败
+  // 先用 --simulate 探测哪个策略能取到媒体（并拿到 CDN 直链），
+  // 之后优先把播放器的 Range 请求直接转发到 CDN（支持拖动/时长显示），
+  // 直链拉取失败再退回 yt-dlp 管道流
   const { execFile } = await import("node:child_process");
   let chosen: typeof attempts[number] | null = null;
+  let directUrl = "";
   let lastErr = "";
   let needsCookies = false;
   for (const s of attempts) {
@@ -256,7 +259,7 @@ async function handle(request: Request): Promise<Response> {
     if (proxy) probeArgs.push("--proxy", proxy);
     probeArgs.push(target);
     try {
-      await new Promise<void>((resolve, reject) => {
+      await new Promise<string>((resolve, reject) => {
         execFile(
           configuredPath,
           probeArgs,
@@ -264,11 +267,15 @@ async function handle(request: Request): Promise<Response> {
             env: { ...process.env, PYTHONIOENCODING: "utf-8" } },
           (error, stdout, stderr) => {
             if (error) { lastErr = redactSensitive(stderr || error.message, proxy); reject(error); return; }
-            if (!String(stdout || "").trim()) { lastErr = "empty url"; reject(new Error("empty")); return; }
-            resolve();
+            const found = String(stdout || "")
+              .split(/\r?\n/)
+              .map((l) => l.trim())
+              .find((l) => /^https?:\/\//i.test(l));
+            if (!found) { lastErr = "empty url"; reject(new Error("empty")); return; }
+            resolve(found);
           },
         );
-      });
+      }).then((u) => { directUrl = u; });
       chosen = s;
       break;
     } catch {
@@ -309,6 +316,53 @@ async function handle(request: Request): Promise<Response> {
     message: chosen.name,
   });
 
+  // —— Range 直转：探测已拿到 CDN 直链（directUrl），直接转发播放器的 Range 请求。
+  //    响应透传 Content-Length / Content-Range 并声明 Accept-Ranges: bytes，
+  //    微信小程序 <video> 才能拿到时长、拖动进度（之前管道流 Accept-Ranges: none 会导致 00:00）。
+  //    CDN 一般在海外服务器上可直接访问；http(s) 代理会尝试走 undici ProxyAgent，socks5 时直连。
+  if (directUrl && request.method === "GET") {
+    try {
+      const fwdHeaders: Record<string, string> = {
+        "user-agent": chosen.ua,
+        referer: referer,
+      };
+      const range = request.headers.get("range");
+      if (range) fwdHeaders["range"] = range;
+      const fetchOpts: Record<string, unknown> = { headers: fwdHeaders, redirect: "follow" };
+      if (proxy && /^https?:\/\//i.test(proxy)) {
+        try {
+          const { ProxyAgent } = await import("undici");
+          fetchOpts.dispatcher = new ProxyAgent(proxy);
+        } catch {
+          /* 运行时没有 undici（如 Bun），退化为直连 CDN */
+        }
+      }
+      const upstream = await fetch(directUrl, fetchOpts as never);
+      if (upstream.ok || upstream.status === 206) {
+        const headers = new Headers(CORS);
+        const ct = upstream.headers.get("content-type") || "";
+        headers.set(
+          "Content-Type",
+          ct.startsWith("video/") || ct.startsWith("audio/") ? ct : type === "audio" ? "audio/mp4" : "video/mp4",
+        );
+        headers.set("Cache-Control", "no-store");
+        const cl = upstream.headers.get("content-length");
+        if (cl) headers.set("Content-Length", cl);
+        const cr = upstream.headers.get("content-range");
+        if (cr) headers.set("Content-Range", cr);
+        headers.set("Accept-Ranges", "bytes");
+        if (shouldDownload) {
+          headers.set("Content-Disposition", attachmentName(filename, type === "audio" ? "audio.m4a" : "video.mp4"));
+        }
+        console.log(`[api/media-stream] direct range forward ok upstream=${upstream.status}`);
+        return new Response(upstream.body, { status: upstream.status, headers });
+      }
+      console.error("[api/media-stream] direct fetch bad status", upstream.status, "→ fallback to pipe");
+    } catch (err) {
+      console.error("[api/media-stream] direct fetch failed → fallback to pipe", err);
+    }
+  }
+
   const args = [
     "-f", format,
     "--no-warnings", "--no-check-certificates",
@@ -333,37 +387,17 @@ async function handle(request: Request): Promise<Response> {
     if (stderr.length > 2000) stderr = stderr.slice(-2000);
   });
 
-  let settled = false;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
-      const close = () => {
-        if (settled) return;
-        settled = true;
-        controller.close();
-      };
-      const error = (err: Error) => {
-        if (settled) return;
-        settled = true;
-        controller.error(err);
-      };
-      child.stdout.on("data", (chunk) => {
-        if (!settled) controller.enqueue(new Uint8Array(chunk));
-      });
-      child.stdout.on("end", close);
-      child.stdout.on("error", error);
-      child.on("error", error);
+      child.stdout.on("data", (chunk) => controller.enqueue(new Uint8Array(chunk)));
+      child.stdout.on("end", () => controller.close());
+      child.stdout.on("error", (err) => controller.error(err));
+      child.on("error", (err) => controller.error(err));
       child.on("close", (code) => {
         if (code && code !== 0) console.error("[api/media-stream] yt-dlp failed", stderr);
-        close();
       });
-      request.signal.addEventListener("abort", () => {
-        if (settled) return;
-        settled = true;
-        child.kill("SIGTERM");
-      }, { once: true });
     },
     cancel() {
-      settled = true;
       child.kill("SIGTERM");
     },
   });
