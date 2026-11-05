@@ -260,6 +260,9 @@ function AdminPage() {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["admin-users"],
     queryFn: () => list(),
+    refetchInterval: activeMenu === "users" ? 3_000 : false,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   });
 
   const onBan = async (id: string, banned: boolean) => {
