@@ -333,17 +333,37 @@ async function handle(request: Request): Promise<Response> {
     if (stderr.length > 2000) stderr = stderr.slice(-2000);
   });
 
+  let settled = false;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
-      child.stdout.on("data", (chunk) => controller.enqueue(new Uint8Array(chunk)));
-      child.stdout.on("end", () => controller.close());
-      child.stdout.on("error", (err) => controller.error(err));
-      child.on("error", (err) => controller.error(err));
+      const close = () => {
+        if (settled) return;
+        settled = true;
+        controller.close();
+      };
+      const error = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        controller.error(err);
+      };
+      child.stdout.on("data", (chunk) => {
+        if (!settled) controller.enqueue(new Uint8Array(chunk));
+      });
+      child.stdout.on("end", close);
+      child.stdout.on("error", error);
+      child.on("error", error);
       child.on("close", (code) => {
         if (code && code !== 0) console.error("[api/media-stream] yt-dlp failed", stderr);
+        close();
       });
+      request.signal.addEventListener("abort", () => {
+        if (settled) return;
+        settled = true;
+        child.kill("SIGTERM");
+      }, { once: true });
     },
     cancel() {
+      settled = true;
       child.kill("SIGTERM");
     },
   });
