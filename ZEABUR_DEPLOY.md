@@ -20,3 +20,18 @@ Zeabur 环境变量至少需要以下变量，名称必须完全一致：
 - `SUPABASE_SERVICE_ROLE_KEY`
 
 海外 TikTok / YouTube 解析依赖 Dockerfile 内置的 `/usr/local/bin/yt-dlp`。重新部署后如果仍显示 HTTP 502，请先确认 Zeabur 使用的是 Dockerfile 构建，而不是 Nixpacks/静态构建。
+
+## 平台 Cookie（可选）
+
+各平台 Cookie 使用 Netscape `cookies.txt` 文件的 Base64 内容，环境变量名称如下：
+
+- `DOUYIN_COOKIES_B64`：抖音
+- `KUAISHOU_COOKIES_B64`：快手
+- `XIAOHONGSHU_COOKIES_B64`：小红书
+- `BILIBILI_COOKIES_B64`：B站
+- `WEIBO_COOKIES_B64`：微博
+- `WEISHI_COOKIES_B64`：微视
+- `WEIXIN_COOKIES_B64`：微信视频号
+- `TIKTOK_COOKIES_B64`、`YOUTUBE_COOKIES_B64`、`INSTAGRAM_COOKIES_B64`、`FACEBOOK_COOKIES_B64`、`TWITTER_COOKIES_B64`、`VIMEO_COOKIES_B64`：海外平台
+
+每个平台也支持同前缀的 `_COOKIES_FILE`、`_COOKIES` 和 `_COOKIE_HEADER`。Cookie 仅用于对应平台，日志会隐藏 Cookie 请求头。快手、微视和视频号目前依赖 yt-dlp 通用提取能力，平台页面或反爬发生变化时仍可能返回不支持或 502。

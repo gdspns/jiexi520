@@ -36,6 +36,9 @@ function determinePlatform(url: string): string {
   if (u.includes("xiaohongshu.com") || u.includes("xhslink.com")) return "小红书";
   if (u.includes("kuaishou.com")) return "快手";
   if (u.includes("bilibili.com") || u.includes("b23.tv")) return "B站";
+  if (u.includes("weibo.com") || u.includes("weibo.cn")) return "微博";
+  if (u.includes("weishi.qq.com")) return "微视";
+  if (u.includes("channels.weixin.qq.com") || u.includes("weixin.qq.com/sph")) return "视频号";
   if (u.includes("tiktok.com")) return "TikTok";
   if (u.includes("youtube.com") || u.includes("youtu.be")) return "YouTube";
   if (u.includes("instagram.com")) return "Instagram";
@@ -49,6 +52,12 @@ function streamUrl(url: string, type: "audio" | "video") {
 function pickRefererForSource(url: string): string {
   const u = url.toLowerCase();
   if (u.includes("douyin.com") || u.includes("iesdouyin.com")) return "https://www.douyin.com/";
+  if (u.includes("kuaishou.com")) return "https://www.kuaishou.com/";
+  if (u.includes("xiaohongshu.com") || u.includes("xhslink.com")) return "https://www.xiaohongshu.com/";
+  if (u.includes("bilibili.com") || u.includes("b23.tv")) return "https://www.bilibili.com/";
+  if (u.includes("weibo.com") || u.includes("weibo.cn")) return "https://weibo.com/";
+  if (u.includes("weishi.qq.com")) return "https://weishi.qq.com/";
+  if (u.includes("channels.weixin.qq.com") || u.includes("weixin.qq.com/sph")) return "https://channels.weixin.qq.com/";
   if (u.includes("tiktok.com")) return "https://www.tiktok.com/";
   if (u.includes("youtube.com") || u.includes("youtu.be")) return "https://www.youtube.com/";
   if (u.includes("instagram.com")) return "https://www.instagram.com/";
@@ -64,9 +73,36 @@ function isLoginCookieRequired(message: string): boolean {
   );
 }
 
-function platformKey(url: string): "DOUYIN" | "TIKTOK" | "YOUTUBE" | "INSTAGRAM" | "FACEBOOK" | "TWITTER" | "VIMEO" | "" {
+type PlatformKey =
+  | "DOUYIN"
+  | "KUAISHOU"
+  | "XIAOHONGSHU"
+  | "BILIBILI"
+  | "WEIBO"
+  | "WEISHI"
+  | "WEIXIN"
+  | "TIKTOK"
+  | "YOUTUBE"
+  | "INSTAGRAM"
+  | "FACEBOOK"
+  | "TWITTER"
+  | "VIMEO"
+  | "";
+
+const COOKIE_PLATFORMS: Exclude<PlatformKey, "">[] = [
+  "DOUYIN", "KUAISHOU", "XIAOHONGSHU", "BILIBILI", "WEIBO", "WEISHI", "WEIXIN",
+  "TIKTOK", "YOUTUBE", "INSTAGRAM", "FACEBOOK", "TWITTER", "VIMEO",
+];
+
+function platformKey(url: string): PlatformKey {
   const u = url.toLowerCase();
   if (u.includes("douyin.com") || u.includes("iesdouyin.com")) return "DOUYIN";
+  if (u.includes("kuaishou.com")) return "KUAISHOU";
+  if (u.includes("xiaohongshu.com") || u.includes("xhslink.com")) return "XIAOHONGSHU";
+  if (u.includes("bilibili.com") || u.includes("b23.tv")) return "BILIBILI";
+  if (u.includes("weibo.com") || u.includes("weibo.cn")) return "WEIBO";
+  if (u.includes("weishi.qq.com")) return "WEISHI";
+  if (u.includes("channels.weixin.qq.com") || u.includes("weixin.qq.com/sph")) return "WEIXIN";
   if (u.includes("tiktok.com")) return "TIKTOK";
   if (u.includes("youtube.com") || u.includes("youtu.be")) return "YOUTUBE";
   if (u.includes("instagram.com")) return "INSTAGRAM";
@@ -101,7 +137,7 @@ async function buildCookieArgSets(prefix: string): Promise<{ name: string; extra
 function redactSensitive(input: unknown, proxy = "") {
   let text = String(input || "");
   if (proxy) text = text.replaceAll(proxy, "[proxy]");
-  for (const p of ["DOUYIN", "TIKTOK", "YOUTUBE", "INSTAGRAM", "FACEBOOK", "TWITTER", "VIMEO"]) {
+  for (const p of COOKIE_PLATFORMS) {
     const h = process.env[`${p}_COOKIE_HEADER`] || process.env[`${p}_COOKIES_HEADER`];
     if (h) text = text.replaceAll(h, `[${p.toLowerCase()}-cookie]`);
   }
