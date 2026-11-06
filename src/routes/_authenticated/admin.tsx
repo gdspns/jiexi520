@@ -252,6 +252,26 @@ function AdminPage() {
     }
   };
 
+  const onToggleApiEnabled = async () => {
+    const nextEnabled = !apiEnabled;
+    const ep = apiEndpoint.trim();
+    const tk = apiToken.trim();
+    const px = apiProxy.trim();
+    if (!/^https?:\/\//i.test(ep)) return alert("请先填写有效的 API 接口地址");
+    if (px && !/^https?:\/\//i.test(px)) return alert("代理地址必须以 http(s):// 开头");
+    setApiEnabled(nextEnabled);
+    setSavingCfg(true);
+    try {
+      await saveCfg({ data: { endpoint: ep, token: tk, proxy: px, enabled: nextEnabled } });
+      alert(nextEnabled ? "付费解析 API 已启用" : "付费解析 API 已暂停，当前仅使用本站解析");
+    } catch (e: any) {
+      setApiEnabled(!nextEnabled);
+      alert(e?.message || "切换失败");
+    } finally {
+      setSavingCfg(false);
+    }
+  };
+
   const onResetCfg = () => {
     if (!defaults) return;
     setApiEndpoint(defaults.endpoint);
@@ -548,8 +568,10 @@ function AdminPage() {
                       type="button"
                       role="switch"
                       aria-checked={apiEnabled}
-                      onClick={() => setApiEnabled((enabled) => !enabled)}
-                      className={`relative h-6 w-11 rounded-full transition-colors ${apiEnabled ? "bg-emerald-500" : "bg-slate-600"}`}
+                      aria-label="启用或暂停付费解析 API"
+                      disabled={savingCfg}
+                      onClick={onToggleApiEnabled}
+                      className={`relative h-6 w-11 rounded-full transition-colors disabled:opacity-50 ${apiEnabled ? "bg-emerald-500" : "bg-slate-600"}`}
                     >
                       <span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${apiEnabled ? "left-6" : "left-1"}`} />
                     </button>
@@ -626,7 +648,7 @@ function AdminPage() {
                     </button>
                   </div>
                   <p className="text-[11px] text-slate-500">
-                    切换开关后请点击“保存配置”。关闭付费 API 后，可直接用国内视频链接验证本站自建解析。
+                    开关点击后立即生效。关闭付费 API 后，可直接用国内视频链接验证本站自建解析。
                   </p>
                 </div>
               </section>

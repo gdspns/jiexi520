@@ -51,6 +51,7 @@ function isOverseasSource(url: string) {
 
 function pickRefererForSource(url: string): string {
   const u = url.toLowerCase();
+  if (u.includes("douyin.com") || u.includes("iesdouyin.com")) return "https://www.douyin.com/";
   if (u.includes("tiktok.com")) return "https://www.tiktok.com/";
   if (u.includes("youtube.com") || u.includes("youtu.be")) return "https://www.youtube.com/";
   if (u.includes("instagram.com")) return "https://www.instagram.com/";
@@ -61,13 +62,14 @@ function pickRefererForSource(url: string): string {
 }
 
 function isLoginCookieRequired(message: string): boolean {
-  return /log in for access|cookies? for the authentication|requires authentication|login required|not comfortable/i.test(
+  return /log in for access|fresh cookies?|cookies? for the authentication|requires authentication|login required|not comfortable/i.test(
     message,
   );
 }
 
-function platformKey(url: string): "TIKTOK" | "YOUTUBE" | "INSTAGRAM" | "FACEBOOK" | "TWITTER" | "VIMEO" | "" {
+function platformKey(url: string): "DOUYIN" | "TIKTOK" | "YOUTUBE" | "INSTAGRAM" | "FACEBOOK" | "TWITTER" | "VIMEO" | "" {
   const u = url.toLowerCase();
+  if (u.includes("douyin.com") || u.includes("iesdouyin.com")) return "DOUYIN";
   if (u.includes("tiktok.com")) return "TIKTOK";
   if (u.includes("youtube.com") || u.includes("youtu.be")) return "YOUTUBE";
   if (u.includes("instagram.com")) return "INSTAGRAM";
@@ -102,7 +104,7 @@ async function buildCookieArgSets(prefix: string): Promise<{ name: string; extra
 function redactSensitive(input: unknown, proxy = "") {
   let text = String(input || "");
   if (proxy) text = text.replaceAll(proxy, "[proxy]");
-  for (const p of ["TIKTOK", "YOUTUBE", "INSTAGRAM", "FACEBOOK", "TWITTER", "VIMEO"]) {
+  for (const p of ["DOUYIN", "TIKTOK", "YOUTUBE", "INSTAGRAM", "FACEBOOK", "TWITTER", "VIMEO"]) {
     const h = process.env[`${p}_COOKIE_HEADER`] || process.env[`${p}_COOKIES_HEADER`];
     if (h) text = text.replaceAll(h, `[${p.toLowerCase()}-cookie]`);
   }
@@ -121,6 +123,12 @@ function buildPlatformStrategies(
       { name: "tiktok-api-useast2a", ua: UA_DESKTOP, extractor: "tiktok:api_hostname=api16-normal-c-useast2a.tiktokv.com" },
       { name: "tiktok-mobile-ua", ua: UA_MOBILE, extractor: "tiktok:app_name=trill;app_version=34.1.2;manifest_app_version=2023401020" },
       { name: "tiktok-webpage", ua: UA_DESKTOP, extractor: "tiktok:webpage_url_basename=video" },
+    ];
+  }
+  if (platform === "DOUYIN") {
+    return [
+      { name: "douyin-desktop", ua: UA_DESKTOP },
+      { name: "douyin-mobile", ua: UA_MOBILE },
     ];
   }
   if (platform === "YOUTUBE") {
