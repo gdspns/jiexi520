@@ -36,9 +36,6 @@ function determinePlatform(url: string): string {
   if (u.includes("xiaohongshu.com") || u.includes("xhslink.com")) return "小红书";
   if (u.includes("kuaishou.com")) return "快手";
   if (u.includes("bilibili.com") || u.includes("b23.tv")) return "B站";
-  if (u.includes("weibo.com") || u.includes("weibo.cn")) return "微博";
-  if (u.includes("weishi.qq.com")) return "微视";
-  if (u.includes("channels.weixin.qq.com") || u.includes("weixin.qq.com/sph")) return "视频号";
   if (u.includes("tiktok.com")) return "TikTok";
   if (u.includes("youtube.com") || u.includes("youtu.be")) return "YouTube";
   if (u.includes("instagram.com")) return "Instagram";
@@ -51,13 +48,6 @@ function streamUrl(url: string, type: "audio" | "video") {
 
 function pickRefererForSource(url: string): string {
   const u = url.toLowerCase();
-  if (u.includes("douyin.com") || u.includes("iesdouyin.com")) return "https://www.douyin.com/";
-  if (u.includes("kuaishou.com")) return "https://www.kuaishou.com/";
-  if (u.includes("xiaohongshu.com") || u.includes("xhslink.com")) return "https://www.xiaohongshu.com/";
-  if (u.includes("bilibili.com") || u.includes("b23.tv")) return "https://www.bilibili.com/";
-  if (u.includes("weibo.com") || u.includes("weibo.cn")) return "https://weibo.com/";
-  if (u.includes("weishi.qq.com")) return "https://weishi.qq.com/";
-  if (u.includes("channels.weixin.qq.com") || u.includes("weixin.qq.com/sph")) return "https://channels.weixin.qq.com/";
   if (u.includes("tiktok.com")) return "https://www.tiktok.com/";
   if (u.includes("youtube.com") || u.includes("youtu.be")) return "https://www.youtube.com/";
   if (u.includes("instagram.com")) return "https://www.instagram.com/";
@@ -68,41 +58,13 @@ function pickRefererForSource(url: string): string {
 }
 
 function isLoginCookieRequired(message: string): boolean {
-  return /log in for access|fresh cookies?|cookies? for the authentication|requires authentication|login required|not comfortable/i.test(
+  return /log in for access|cookies? for the authentication|requires authentication|login required|not comfortable/i.test(
     message,
   );
 }
 
-type PlatformKey =
-  | "DOUYIN"
-  | "KUAISHOU"
-  | "XIAOHONGSHU"
-  | "BILIBILI"
-  | "WEIBO"
-  | "WEISHI"
-  | "WEIXIN"
-  | "TIKTOK"
-  | "YOUTUBE"
-  | "INSTAGRAM"
-  | "FACEBOOK"
-  | "TWITTER"
-  | "VIMEO"
-  | "";
-
-const COOKIE_PLATFORMS: Exclude<PlatformKey, "">[] = [
-  "DOUYIN", "KUAISHOU", "XIAOHONGSHU", "BILIBILI", "WEIBO", "WEISHI", "WEIXIN",
-  "TIKTOK", "YOUTUBE", "INSTAGRAM", "FACEBOOK", "TWITTER", "VIMEO",
-];
-
-function platformKey(url: string): PlatformKey {
+function platformKey(url: string): "TIKTOK" | "YOUTUBE" | "INSTAGRAM" | "FACEBOOK" | "TWITTER" | "VIMEO" | "" {
   const u = url.toLowerCase();
-  if (u.includes("douyin.com") || u.includes("iesdouyin.com")) return "DOUYIN";
-  if (u.includes("kuaishou.com")) return "KUAISHOU";
-  if (u.includes("xiaohongshu.com") || u.includes("xhslink.com")) return "XIAOHONGSHU";
-  if (u.includes("bilibili.com") || u.includes("b23.tv")) return "BILIBILI";
-  if (u.includes("weibo.com") || u.includes("weibo.cn")) return "WEIBO";
-  if (u.includes("weishi.qq.com")) return "WEISHI";
-  if (u.includes("channels.weixin.qq.com") || u.includes("weixin.qq.com/sph")) return "WEIXIN";
   if (u.includes("tiktok.com")) return "TIKTOK";
   if (u.includes("youtube.com") || u.includes("youtu.be")) return "YOUTUBE";
   if (u.includes("instagram.com")) return "INSTAGRAM";
@@ -137,7 +99,7 @@ async function buildCookieArgSets(prefix: string): Promise<{ name: string; extra
 function redactSensitive(input: unknown, proxy = "") {
   let text = String(input || "");
   if (proxy) text = text.replaceAll(proxy, "[proxy]");
-  for (const p of COOKIE_PLATFORMS) {
+  for (const p of ["TIKTOK", "YOUTUBE", "INSTAGRAM", "FACEBOOK", "TWITTER", "VIMEO"]) {
     const h = process.env[`${p}_COOKIE_HEADER`] || process.env[`${p}_COOKIES_HEADER`];
     if (h) text = text.replaceAll(h, `[${p.toLowerCase()}-cookie]`);
   }
@@ -156,12 +118,6 @@ function buildPlatformStrategies(
       { name: "tiktok-api-useast2a", extra: ["--add-header", `user-agent:${UA_DESKTOP}`, "--extractor-args", "tiktok:api_hostname=api16-normal-c-useast2a.tiktokv.com"] },
       { name: "tiktok-mobile-ua", extra: ["--add-header", `user-agent:${UA_MOBILE}`, "--extractor-args", "tiktok:app_name=trill;app_version=34.1.2;manifest_app_version=2023401020"] },
       { name: "tiktok-webpage", extra: ["--add-header", `user-agent:${UA_DESKTOP}`, "--extractor-args", "tiktok:webpage_url_basename=video"] },
-    ];
-  }
-  if (platform === "DOUYIN") {
-    return [
-      { name: "douyin-desktop", extra: ["--add-header", `user-agent:${UA_DESKTOP}`] },
-      { name: "douyin-mobile", extra: ["--add-header", `user-agent:${UA_MOBILE}`] },
     ];
   }
   if (platform === "YOUTUBE") {
@@ -199,7 +155,7 @@ async function parseDomestic(url: string, endpoint: string, token: string) {
   const form = new FormData();
   form.append("token", token);
   form.append("url", url);
-  const res = await fetch(endpoint, { method: "POST", body: form, signal: AbortSignal.timeout(15_000) });
+  const res = await fetch(endpoint, { method: "POST", body: form });
   if (!res.ok) throw new Error(`上游接口错误 ${res.status}`);
   const data: any = await res.json();
   if (data.code !== 200 || !data.data) throw new Error(data.msg || "解析失败");
@@ -216,14 +172,14 @@ async function parseDomestic(url: string, endpoint: string, token: string) {
   };
 }
 
-async function parseWithSelfHostedEngine(url: string, proxy: string) {
+async function parseOverseas(url: string, proxy: string) {
   const configuredPath = process.env.YOUTUBE_DL_PATH || "/usr/local/bin/yt-dlp";
   try {
     const fs = await import("node:fs");
     fs.accessSync(configuredPath, fs.constants.X_OK);
   } catch (e: any) {
     throw new Error(
-      `本站解析引擎 (yt-dlp) 不可用或不可执行：${configuredPath}。请确认 Zeabur 使用 Dockerfile 构建。`,
+      `海外解析引擎 (yt-dlp) 不可用或不可执行：${configuredPath}。请确认 Zeabur 使用 Dockerfile 构建。`,
     );
   }
 
@@ -308,16 +264,10 @@ async function parseWithSelfHostedEngine(url: string, proxy: string) {
   }
   if (needsCookies && cookieArgSets.length === 0) {
     throw new Error(
-      `该 ${platform || "平台"} 视频需要有效 Cookie 才能由本站解析。请在 Zeabur 环境变量添加 ${platform}_COOKIES_B64（推荐）或 ${platform}_COOKIES / ${platform}_COOKIE_HEADER 后重启。`,
+      `该 ${platform || "海外"} 视频需要登录 Cookie 才能解析。请在 Zeabur 环境变量添加 ${platform}_COOKIES_B64 (推荐) 或 ${platform}_COOKIES / ${platform}_COOKIE_HEADER 后重启。`,
     );
   }
-  throw new Error("本站解析失败（已尝试 " + attempts.length + " 种策略）：" + errors.join(" || ").slice(0, 1500));
-}
-
-function normalizeBoolean(value: unknown, fallback: boolean): boolean {
-  if (typeof value === "boolean") return value;
-  if (value == null) return fallback;
-  return String(value).toLowerCase() === "true";
+  throw new Error("海外解析失败（已尝试 " + attempts.length + " 种策略）：" + errors.join(" || ").slice(0, 1500));
 }
 
 async function handle(request: Request): Promise<Response> {
@@ -345,50 +295,26 @@ async function handle(request: Request): Promise<Response> {
   if (url.length > 1000) return json({ error: "URL 过长" }, 400);
 
   // 读取配置
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const settingsSb = serviceRoleKey
-    ? createClient(process.env.SUPABASE_URL!, serviceRoleKey, {
-        auth: { persistSession: false, autoRefreshToken: false },
-      })
-    : userSb;
-  const { data: cfgRows, error: cfgError } = await settingsSb
+  const { data: cfgRows, error: cfgError } = await userSb
     .from("app_settings")
     .select("key,value")
-    .in("key", ["api_endpoint", "api_token", "api_proxy", "api_enabled"]);
+    .in("key", ["api_endpoint", "api_token", "api_proxy"]);
   if (cfgError) {
     console.error("[api/parse] failed to read app_settings", cfgError);
-    return json({ error: "读取解析配置失败，请联系管理员" }, 503);
   }
   const cfgMap = new Map((cfgRows ?? []).map((r: any) => [r.key, r.value]));
   const normStr = (v: any, d: string) => (typeof v === "string" ? v : v == null ? d : String(v));
   const endpoint = normStr(cfgMap.get("api_endpoint"), DEFAULT_ENDPOINT);
   const apiToken = normStr(cfgMap.get("api_token"), DEFAULT_TOKEN);
   const proxy = normStr(cfgMap.get("api_proxy"), "");
-  const apiEnabled = normalizeBoolean(cfgMap.get("api_enabled"), true);
 
   // 执行解析
   let result: any;
   try {
     if (isOverseas(url)) {
-      result = await parseWithSelfHostedEngine(url, proxy);
-      result.parse_source = "self_hosted";
+      result = await parseOverseas(url, proxy);
     } else {
-      if (apiEnabled) {
-        try {
-          result = await parseDomestic(url, endpoint, apiToken);
-          result.parse_source = "paid_api";
-        } catch (upstreamError: any) {
-          console.warn("[api/parse] paid API failed, falling back to self-hosted engine", {
-            platform: determinePlatform(url),
-            message: upstreamError?.message || String(upstreamError),
-          });
-          result = await parseWithSelfHostedEngine(url, "");
-          result.parse_source = "self_hosted_fallback";
-        }
-      } else {
-        result = await parseWithSelfHostedEngine(url, "");
-        result.parse_source = "self_hosted";
-      }
+      result = await parseDomestic(url, endpoint, apiToken);
     }
   } catch (e: any) {
     console.error("[api/parse] parse failed", {

@@ -24,45 +24,12 @@ function isSupportedSource(url: string) {
     u.includes("facebook.com") ||
     u.includes("twitter.com") ||
     u.includes("x.com") ||
-    u.includes("vimeo.com") ||
-    u.includes("douyin.com") ||
-    u.includes("iesdouyin.com") ||
-    u.includes("xiaohongshu.com") ||
-    u.includes("xhslink.com") ||
-    u.includes("kuaishou.com") ||
-    u.includes("bilibili.com") ||
-    u.includes("b23.tv") ||
-    u.includes("weibo.com") ||
-    u.includes("weibo.cn") ||
-    u.includes("weishi.qq.com") ||
-    u.includes("channels.weixin.qq.com") ||
-    u.includes("weixin.qq.com/sph")
-  );
-}
-
-function isOverseasSource(url: string) {
-  const u = url.toLowerCase();
-  return (
-    u.includes("tiktok.com") ||
-    u.includes("youtube.com") ||
-    u.includes("youtu.be") ||
-    u.includes("instagram.com") ||
-    u.includes("facebook.com") ||
-    u.includes("twitter.com") ||
-    u.includes("x.com") ||
     u.includes("vimeo.com")
   );
 }
 
 function pickRefererForSource(url: string): string {
   const u = url.toLowerCase();
-  if (u.includes("douyin.com") || u.includes("iesdouyin.com")) return "https://www.douyin.com/";
-  if (u.includes("kuaishou.com")) return "https://www.kuaishou.com/";
-  if (u.includes("xiaohongshu.com") || u.includes("xhslink.com")) return "https://www.xiaohongshu.com/";
-  if (u.includes("bilibili.com") || u.includes("b23.tv")) return "https://www.bilibili.com/";
-  if (u.includes("weibo.com") || u.includes("weibo.cn")) return "https://weibo.com/";
-  if (u.includes("weishi.qq.com")) return "https://weishi.qq.com/";
-  if (u.includes("channels.weixin.qq.com") || u.includes("weixin.qq.com/sph")) return "https://channels.weixin.qq.com/";
   if (u.includes("tiktok.com")) return "https://www.tiktok.com/";
   if (u.includes("youtube.com") || u.includes("youtu.be")) return "https://www.youtube.com/";
   if (u.includes("instagram.com")) return "https://www.instagram.com/";
@@ -73,41 +40,13 @@ function pickRefererForSource(url: string): string {
 }
 
 function isLoginCookieRequired(message: string): boolean {
-  return /log in for access|fresh cookies?|cookies? for the authentication|requires authentication|login required|not comfortable/i.test(
+  return /log in for access|cookies? for the authentication|requires authentication|login required|not comfortable/i.test(
     message,
   );
 }
 
-type PlatformKey =
-  | "DOUYIN"
-  | "KUAISHOU"
-  | "XIAOHONGSHU"
-  | "BILIBILI"
-  | "WEIBO"
-  | "WEISHI"
-  | "WEIXIN"
-  | "TIKTOK"
-  | "YOUTUBE"
-  | "INSTAGRAM"
-  | "FACEBOOK"
-  | "TWITTER"
-  | "VIMEO"
-  | "";
-
-const COOKIE_PLATFORMS: Exclude<PlatformKey, "">[] = [
-  "DOUYIN", "KUAISHOU", "XIAOHONGSHU", "BILIBILI", "WEIBO", "WEISHI", "WEIXIN",
-  "TIKTOK", "YOUTUBE", "INSTAGRAM", "FACEBOOK", "TWITTER", "VIMEO",
-];
-
-function platformKey(url: string): PlatformKey {
+function platformKey(url: string): "TIKTOK" | "YOUTUBE" | "INSTAGRAM" | "FACEBOOK" | "TWITTER" | "VIMEO" | "" {
   const u = url.toLowerCase();
-  if (u.includes("douyin.com") || u.includes("iesdouyin.com")) return "DOUYIN";
-  if (u.includes("kuaishou.com")) return "KUAISHOU";
-  if (u.includes("xiaohongshu.com") || u.includes("xhslink.com")) return "XIAOHONGSHU";
-  if (u.includes("bilibili.com") || u.includes("b23.tv")) return "BILIBILI";
-  if (u.includes("weibo.com") || u.includes("weibo.cn")) return "WEIBO";
-  if (u.includes("weishi.qq.com")) return "WEISHI";
-  if (u.includes("channels.weixin.qq.com") || u.includes("weixin.qq.com/sph")) return "WEIXIN";
   if (u.includes("tiktok.com")) return "TIKTOK";
   if (u.includes("youtube.com") || u.includes("youtu.be")) return "YOUTUBE";
   if (u.includes("instagram.com")) return "INSTAGRAM";
@@ -142,7 +81,7 @@ async function buildCookieArgSets(prefix: string): Promise<{ name: string; extra
 function redactSensitive(input: unknown, proxy = "") {
   let text = String(input || "");
   if (proxy) text = text.replaceAll(proxy, "[proxy]");
-  for (const p of COOKIE_PLATFORMS) {
+  for (const p of ["TIKTOK", "YOUTUBE", "INSTAGRAM", "FACEBOOK", "TWITTER", "VIMEO"]) {
     const h = process.env[`${p}_COOKIE_HEADER`] || process.env[`${p}_COOKIES_HEADER`];
     if (h) text = text.replaceAll(h, `[${p.toLowerCase()}-cookie]`);
   }
@@ -161,12 +100,6 @@ function buildPlatformStrategies(
       { name: "tiktok-api-useast2a", ua: UA_DESKTOP, extractor: "tiktok:api_hostname=api16-normal-c-useast2a.tiktokv.com" },
       { name: "tiktok-mobile-ua", ua: UA_MOBILE, extractor: "tiktok:app_name=trill;app_version=34.1.2;manifest_app_version=2023401020" },
       { name: "tiktok-webpage", ua: UA_DESKTOP, extractor: "tiktok:webpage_url_basename=video" },
-    ];
-  }
-  if (platform === "DOUYIN") {
-    return [
-      { name: "douyin-desktop", ua: UA_DESKTOP },
-      { name: "douyin-mobile", ua: UA_MOBILE },
     ];
   }
   if (platform === "YOUTUBE") {
@@ -270,7 +203,7 @@ async function handle(request: Request): Promise<Response> {
   }
 
   const { spawn } = await import("node:child_process");
-  const proxy = isOverseasSource(target) ? await readProxySetting() : "";
+  const proxy = await readProxySetting();
   const referer = pickRefererForSource(target);
   const format =
     type === "audio" ? "bestaudio[ext=m4a]/bestaudio/best[ext=mp4]/best" : "best[ext=mp4]/best";
