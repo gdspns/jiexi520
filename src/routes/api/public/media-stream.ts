@@ -24,6 +24,27 @@ function isSupportedSource(url: string) {
     u.includes("facebook.com") ||
     u.includes("twitter.com") ||
     u.includes("x.com") ||
+    u.includes("vimeo.com") ||
+    u.includes("douyin.com") ||
+    u.includes("iesdouyin.com") ||
+    u.includes("xiaohongshu.com") ||
+    u.includes("xhslink.com") ||
+    u.includes("kuaishou.com") ||
+    u.includes("bilibili.com") ||
+    u.includes("b23.tv")
+  );
+}
+
+function isOverseasSource(url: string) {
+  const u = url.toLowerCase();
+  return (
+    u.includes("tiktok.com") ||
+    u.includes("youtube.com") ||
+    u.includes("youtu.be") ||
+    u.includes("instagram.com") ||
+    u.includes("facebook.com") ||
+    u.includes("twitter.com") ||
+    u.includes("x.com") ||
     u.includes("vimeo.com")
   );
 }
@@ -203,7 +224,7 @@ async function handle(request: Request): Promise<Response> {
   }
 
   const { spawn } = await import("node:child_process");
-  const proxy = await readProxySetting();
+  const proxy = isOverseasSource(target) ? await readProxySetting() : "";
   const referer = pickRefererForSource(target);
   const format =
     type === "audio" ? "bestaudio[ext=m4a]/bestaudio/best[ext=mp4]/best" : "best[ext=mp4]/best";

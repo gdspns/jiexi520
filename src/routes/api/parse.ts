@@ -155,7 +155,7 @@ async function parseDomestic(url: string, endpoint: string, token: string) {
   const form = new FormData();
   form.append("token", token);
   form.append("url", url);
-  const res = await fetch(endpoint, { method: "POST", body: form });
+  const res = await fetch(endpoint, { method: "POST", body: form, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`上游接口错误 ${res.status}`);
   const data: any = await res.json();
   if (data.code !== 200 || !data.data) throw new Error(data.msg || "解析失败");
@@ -172,14 +172,14 @@ async function parseDomestic(url: string, endpoint: string, token: string) {
   };
 }
 
-async function parseOverseas(url: string, proxy: string) {
+async function parseWithSelfHostedEngine(url: string, proxy: string) {
   const configuredPath = process.env.YOUTUBE_DL_PATH || "/usr/local/bin/yt-dlp";
   try {
     const fs = await import("node:fs");
     fs.accessSync(configuredPath, fs.constants.X_OK);
   } catch (e: any) {
     throw new Error(
-      `海外解析引擎 (yt-dlp) 不可用或不可执行：${configuredPath}。请确认 Zeabur 使用 Dockerfile 构建。`,
+      `本站解析引擎 (yt-dlp) 不可用或不可执行：${configuredPath}。请确认 Zeabur 使用 Dockerfile 构建。`,
     );
   }
 
@@ -267,7 +267,13 @@ async function parseOverseas(url: string, proxy: string) {
       `该 ${platform || "海外"} 视频需要登录 Cookie 才能解析。请在 Zeabur 环境变量添加 ${platform}_COOKIES_B64 (推荐) 或 ${platform}_COOKIES / ${platform}_COOKIE_HEADER 后重启。`,
     );
   }
-  throw new Error("海外解析失败（已尝试 " + attempts.length + " 种策略）：" + errors.join(" || ").slice(0, 1500));
+  throw new Error("本站解析失败（已尝试 " + attempts.length + " 种策略）：" + errors.join(" || ").slice(0, 1500));
+}
+
+function normalizeBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") return value;
+  if (value == null) return fallback;
+  return String(value).toLowerCase() === "true";
 }
 
 async function handle(request: Request): Promise<Response> {
@@ -298,7 +304,7 @@ async function handle(request: Request): Promise<Response> {
   const { data: cfgRows, error: cfgError } = await userSb
     .from("app_settings")
     .select("key,value")
-    .in("key", ["api_endpoint", "api_token", "api_proxy"]);
+    .in("key", ["api_endpoint", "api_token", "api_proxy", "api_enabled"]);
   if (cfgError) {
     console.error("[api/parse] failed to read app_settings", cfgError);
   }
@@ -307,14 +313,31 @@ async function handle(request: Request): Promise<Response> {
   const endpoint = normStr(cfgMap.get("api_endpoint"), DEFAULT_ENDPOINT);
   const apiToken = normStr(cfgMap.get("api_token"), DEFAULT_TOKEN);
   const proxy = normStr(cfgMap.get("api_proxy"), "");
+  const apiEnabled = normalizeBoolean(cfgMap.get("api_enabled"), true);
 
   // 执行解析
   let result: any;
   try {
     if (isOverseas(url)) {
-      result = await parseOverseas(url, proxy);
+      result = await parseWithSelfHostedEngine(url, proxy);
+      result.parse_source = "self_hosted";
     } else {
-      result = await parseDomestic(url, endpoint, apiToken);
+      if (apiEnabled) {
+        try {
+          result = await parseDomestic(url, endpoint, apiToken);
+          result.parse_source = "paid_api";
+        } catch (upstreamError: any) {
+          console.warn("[api/parse] paid API failed, falling back to self-hosted engine", {
+            platform: determinePlatform(url),
+            message: upstreamError?.message || String(upstreamError),
+          });
+          result = await parseWithSelfHostedEngine(url, "");
+          result.parse_source = "self_hosted_fallback";
+        }
+      } else {
+        result = await parseWithSelfHostedEngine(url, "");
+        result.parse_source = "self_hosted";
+      }
     }
   } catch (e: any) {
     console.error("[api/parse] parse failed", {

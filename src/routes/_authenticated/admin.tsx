@@ -49,10 +49,11 @@ function AdminPage() {
   const [apiEndpoint, setApiEndpoint] = useState("");
   const [apiToken, setApiToken] = useState("");
   const [apiProxy, setApiProxy] = useState("");
+  const [apiEnabled, setApiEnabled] = useState(true);
   const [showToken, setShowToken] = useState(false);
   const [showProxy, setShowProxy] = useState(false);
   const [savingCfg, setSavingCfg] = useState(false);
-  const [defaults, setDefaults] = useState<{ endpoint: string; token: string; proxy: string } | null>(null);
+  const [defaults, setDefaults] = useState<{ endpoint: string; token: string; proxy: string; enabled: boolean } | null>(null);
 
   // 支付配置
   const [payCfg, setPayCfg] = useState({
@@ -128,6 +129,7 @@ function AdminPage() {
         setApiEndpoint(r.endpoint);
         setApiToken(r.token);
         setApiProxy(r.proxy || "");
+        setApiEnabled(r.enabled);
         setDefaults(r.defaults);
       })
       .catch(() => {});
@@ -241,7 +243,7 @@ function AdminPage() {
     if (px && !/^https?:\/\//i.test(px)) return alert("代理地址必须以 http(s):// 开头（例如 http://user:pass@ip:port）");
     setSavingCfg(true);
     try {
-      await saveCfg({ data: { endpoint: ep, token: tk, proxy: px } });
+      await saveCfg({ data: { endpoint: ep, token: tk, proxy: px, enabled: apiEnabled } });
       alert("API 配置已保存");
     } catch (e: any) {
       alert(e?.message || "保存失败");
@@ -255,6 +257,7 @@ function AdminPage() {
     setApiEndpoint(defaults.endpoint);
     setApiToken(defaults.token);
     setApiProxy(defaults.proxy || "");
+    setApiEnabled(defaults.enabled);
   };
 
   const { data, isLoading, error, refetch } = useQuery({
@@ -532,8 +535,26 @@ function AdminPage() {
               </section>
 
               <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-                <h2 className="text-base font-bold mb-1">解析 API 配置</h2>
-                <p className="text-xs text-slate-400 mb-3">配置视频解析接口地址与密钥，保存后立即对所有用户生效。</p>
+                <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+                  <div>
+                    <h2 className="text-base font-bold mb-1">付费解析 API</h2>
+                    <p className="text-xs text-slate-400">开启时优先使用付费 API，接口失败会自动切换到本站解析；关闭时仅使用本站解析。</p>
+                  </div>
+                  <div className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2">
+                    <span className={`text-xs font-semibold ${apiEnabled ? "text-emerald-300" : "text-amber-300"}`}>
+                      {apiEnabled ? "已启用" : "已暂停"}
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={apiEnabled}
+                      onClick={() => setApiEnabled((enabled) => !enabled)}
+                      className={`relative h-6 w-11 rounded-full transition-colors ${apiEnabled ? "bg-emerald-500" : "bg-slate-600"}`}
+                    >
+                      <span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${apiEnabled ? "left-6" : "left-1"}`} />
+                    </button>
+                  </div>
+                </div>
                 <div className="space-y-3">
                   <div>
                     <label className="block text-xs text-slate-400 mb-1">API 接口地址</label>
@@ -604,6 +625,9 @@ function AdminPage() {
                       恢复默认
                     </button>
                   </div>
+                  <p className="text-[11px] text-slate-500">
+                    切换开关后请点击“保存配置”。关闭付费 API 后，可直接用国内视频链接验证本站自建解析。
+                  </p>
                 </div>
               </section>
 
