@@ -87,6 +87,7 @@ async function handle(request: Request): Promise<Response> {
   const reqUrl = new URL(request.url);
   const target = reqUrl.searchParams.get("url");
   const shouldDownload = reqUrl.searchParams.get("download") === "1";
+  const requestedType = reqUrl.searchParams.get("type");
   const filename = reqUrl.searchParams.get("filename");
   if (!target) {
     return new Response("Missing url", { status: 400, headers: CORS });
@@ -145,6 +146,10 @@ async function handle(request: Request): Promise<Response> {
   }
   if (!respHeaders.has("content-type")) {
     respHeaders.set("content-type", "application/octet-stream");
+  }
+  const currentType = respHeaders.get("content-type") || "";
+  if (requestedType === "video" && !currentType.toLowerCase().startsWith("video/")) {
+    respHeaders.set("content-type", "video/mp4");
   }
   if (shouldDownload) {
     respHeaders.set("Content-Disposition", attachmentName(filename, "download"));

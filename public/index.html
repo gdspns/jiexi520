@@ -129,7 +129,7 @@
         }
 
         /* 移动端采用附件中「视频保存助手」模板；桌面端完全不进入这些规则 */
-        .mobile-template, .mobile-bottom-nav, .mobile-paste-btn, .mobile-sheet-mask, .mobile-sheet { display: none; }
+        .mobile-template, .mobile-bottom-nav, .mobile-paste-btn, .mobile-sheet-mask, .mobile-sheet, .mobile-tab-label { display: none; }
         @media (max-width: 640px) {
             html { background: #0e1220; }
             body {
@@ -210,15 +210,49 @@
                 min-height: 70px;
                 padding: 13px 12px;
                 overflow: hidden;
-                border: 1px solid rgba(255,255,255,.08);
+                border: 0;
                 border-radius: 14px;
                 color: #fff;
                 text-align: left;
                 box-shadow: 0 8px 18px rgba(0,0,0,.16);
             }
+            .mobile-quick-card > * { position: relative; z-index: 2; }
+            .mobile-quick-card::before {
+                position: absolute;
+                z-index: 1;
+                content: '';
+                inset: 0;
+                padding: 2px;
+                border-radius: inherit;
+                background: linear-gradient(90deg,#34d399,#38bdf8,#a78bfa,#f472b6,#34d399);
+                background-size: 300% 100%;
+                -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+                -webkit-mask-composite: xor;
+                mask-composite: exclude;
+                animation: mobile-grid-border 3.6s linear infinite;
+                pointer-events: none;
+            }
+            .mobile-quick-card::after {
+                position: absolute;
+                z-index: 1;
+                content: '';
+                top: 0;
+                left: -70%;
+                width: 42%;
+                height: 100%;
+                background: linear-gradient(100deg,transparent,rgba(255,255,255,.45),transparent);
+                transform: skewX(-18deg);
+                animation: mobile-grid-shine 3.2s ease-in-out infinite;
+                pointer-events: none;
+            }
+            .mobile-quick-card:nth-child(2)::before, .mobile-quick-card:nth-child(2)::after { animation-delay: -.8s; }
+            .mobile-quick-card:nth-child(3)::before, .mobile-quick-card:nth-child(3)::after { animation-delay: -1.6s; }
+            .mobile-quick-card:nth-child(4)::before, .mobile-quick-card:nth-child(4)::after { animation-delay: -2.4s; }
+            @keyframes mobile-grid-border { to { background-position: 300% 50%; } }
+            @keyframes mobile-grid-shine { 0% { left: -70%; } 55%,100% { left: 130%; } }
             .mobile-quick-card strong { display: block; font-size: 14px; }
             .mobile-quick-card small { display: block; margin-top: 5px; opacity: .82; font-size: 10px; }
-            .mobile-quick-card i { position: absolute; right: 12px; bottom: 12px; font-size: 20px; opacity: .86; }
+            .mobile-quick-card i { position: absolute; z-index: 2; right: 12px; bottom: 12px; font-size: 20px; opacity: .86; }
             .mobile-quick-card.green { background: linear-gradient(135deg, #45cb74, #2aa958); }
             .mobile-quick-card.cyan { background: linear-gradient(135deg, #35bdef, #1789c6); }
             .mobile-quick-card.purple { background: linear-gradient(135deg, #9166f8, #6a3cf0); }
@@ -250,6 +284,8 @@
                 background: #2f6bff;
                 box-shadow: 0 4px 12px rgba(47,107,255,.24);
             }
+            #tab-local-btn .desktop-tab-label { display: none; }
+            #tab-local-btn .mobile-tab-label { display: inline; }
             #convert-form > .flex {
                 display: grid !important;
                 grid-template-columns: minmax(0, 1fr) 82px;
@@ -318,7 +354,8 @@
             .mobile-gallery-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 9px; }
             .mobile-gallery-item { overflow: hidden; border: 1px solid rgba(255,255,255,.07); border-radius: 12px; background: #0f1526; }
             .mobile-gallery-item img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
-            .mobile-gallery-item button { width: 100%; padding: 9px 4px; border: 0; background: #1f2842; color: #d5ddec; font-size: 10px; font-weight: 600; }
+            .mobile-gallery-item button { width: calc(100% - 12px); min-height: 38px; margin: 6px; padding: 9px 4px; border: 1px solid rgba(255,255,255,.18); border-radius: 10px; background: linear-gradient(135deg,#4a86ff,#2f6bff); color: #fff; font-size: 11px; font-weight: 700; box-shadow: 0 6px 14px rgba(47,107,255,.3); }
+            .mobile-gallery-item button:active { transform: scale(.96); opacity: .88; }
             #result-container .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
             #result-container .grid button { min-height: 42px; padding: 8px !important; font-size: 11px; }
             #batch-urls-input { min-height: 150px; font-size: 12px; }
@@ -534,7 +571,7 @@
                 <button id="tab-batch-btn" class="flex-1 py-3 px-4 text-sm sm:text-base font-semibold text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition-colors">
                     <i class="fa-solid fa-layer-group mr-1"></i>批量解析
                 </button>
-                <button id="tab-local-btn" class="flex-1 py-3 px-4 text-sm sm:text-base font-semibold text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition-colors">本地转换</button>
+                <button id="tab-local-btn" class="flex-1 py-3 px-4 text-sm sm:text-base font-semibold text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition-colors"><span class="desktop-tab-label">本地转换</span><span class="mobile-tab-label">图集解析</span></button>
             </div>
 
             <!-- ================= Tab 1: Single Link ================= -->
@@ -709,7 +746,7 @@
             <button class="mobile-quick-card green" onclick="openMobileSheet('mobile-guide-sheet')"><strong>使用教程</strong><small>查看解析与保存方法</small><i class="fa-solid fa-book-open"></i></button>
             <button class="mobile-quick-card cyan" onclick="document.getElementById('tab-link-btn').click();document.getElementById('url-input').focus()"><strong>短视频解析</strong><small>粘贴链接立即处理</small><i class="fa-solid fa-video"></i></button>
             <button class="mobile-quick-card purple" onclick="document.getElementById('tab-batch-btn').click()"><strong>批量解析</strong><small>多条链接一起处理</small><i class="fa-solid fa-layer-group"></i></button>
-            <button class="mobile-quick-card pink" onclick="document.getElementById('tab-local-btn').click()"><strong>本地转换</strong><small>本地视频提取音频</small><i class="fa-solid fa-file-audio"></i></button>
+            <button class="mobile-quick-card pink" onclick="document.getElementById('tab-local-btn').click()"><strong>图集解析</strong><small>图片批量预览与保存</small><i class="fa-solid fa-images"></i></button>
         </div>
 
         <!-- ================= 支持平台 & 搬运介绍 ================= -->
@@ -1148,6 +1185,15 @@
             return '/api/public/media-proxy?url=' + encodeURIComponent(u);
         }
 
+        function proxifyVideo(u) {
+            if (!u) return u;
+            if (u.startsWith('/api/public/media-stream')) return u;
+            if (u.startsWith('/api/public/media-proxy')) {
+                return u + (u.includes('?') ? '&' : '?') + 'type=video';
+            }
+            return '/api/public/media-proxy?type=video&url=' + encodeURIComponent(u);
+        }
+
         // ================= 核心：纯正 MP3 转码引擎 =================
         async function convertToMp3Blob(arrayBuffer, progressCallback) {
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -1477,10 +1523,16 @@
         const tabs = ['link', 'batch', 'local'];
         tabs.forEach(tab => {
             document.getElementById(`tab-${tab}-btn`).addEventListener('click', () => {
+                const selectedTab = tab === 'local' && isMobileLayout() ? 'link' : tab;
+                if (tab === 'local' && isMobileLayout()) {
+                    const input = document.getElementById('url-input');
+                    input.placeholder = '粘贴小红书、抖音图文等作品链接...';
+                    setTimeout(() => input.focus(), 0);
+                }
                 tabs.forEach(t => {
                     const btn = document.getElementById(`tab-${t}-btn`);
                     const content = document.getElementById(`tab-${t}-content`);
-                    if(t === tab) {
+                    if(t === selectedTab) {
                         btn.className = btn.className.replace('text-slate-400', 'text-white').replace('border-transparent', 'border-primary-500');
                         content.classList.remove('hidden');
                     } else {
@@ -1540,13 +1592,12 @@
                 mobileVideo.dataset.fallbackUsed = '0';
                 mobileVideo.onerror = () => {
                     if (mobileVideo.dataset.fallbackUsed === '1') return;
-                    const fallback = proxify(data.video_url);
-                    if (fallback === mobileVideo.src || fallback === data.video_url) return;
+                    const fallback = data.video_url;
                     mobileVideo.dataset.fallbackUsed = '1';
                     mobileVideo.src = fallback;
                     mobileVideo.load();
                 };
-                mobileVideo.src = data.video_url;
+                mobileVideo.src = proxifyVideo(data.video_url);
                 mobileVideo.style.display = 'block';
                 mobileVideo.load();
                 thumbnail.style.display = 'none';
