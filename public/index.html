@@ -1661,6 +1661,16 @@
                 mobileVideo.onloadeddata = markVideoReady;
                 mobileVideo.onplaying = () => videoState.classList.add('hidden');
                 mobileVideo.onerror = () => {
+                    if (mobileVideo.dataset.fallbackUsed === '0' && /^https?:\/\//i.test(data.video_url)) {
+                        mobileVideo.dataset.fallbackUsed = '1';
+                        videoSpinner.style.display = 'block';
+                        videoReady.style.display = 'none';
+                        videoStatus.style.display = 'block';
+                        videoStatus.textContent = '正在转换为兼容格式…';
+                        mobileVideo.src = '/api/public/video-compat?url=' + encodeURIComponent(data.video_url);
+                        mobileVideo.load();
+                        return;
+                    }
                     videoSpinner.style.display = 'none';
                     videoReady.style.display = 'none';
                     videoStatus.style.display = 'block';

@@ -19,6 +19,7 @@ import { Route as ApiRechargeStatusRouteImport } from './routes/api/recharge/sta
 import { Route as ApiRechargeProductsRouteImport } from './routes/api/recharge/products'
 import { Route as ApiRechargeCreateRouteImport } from './routes/api/recharge/create'
 import { Route as ApiPublicXunhupayNotifyRouteImport } from './routes/api/public/xunhupay-notify'
+import { Route as ApiPublicVideoCompatRouteImport } from './routes/api/public/video-compat'
 import { Route as ApiPublicMediaStreamRouteImport } from './routes/api/public/media-stream'
 import { Route as ApiPublicMediaProxyRouteImport } from './routes/api/public/media-proxy'
 import { Route as ApiPublicAuthTokenRouteImport } from './routes/api/public/auth-token'
@@ -72,6 +73,11 @@ const ApiPublicXunhupayNotifyRoute = ApiPublicXunhupayNotifyRouteImport.update({
   path: '/api/public/xunhupay-notify',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicVideoCompatRoute = ApiPublicVideoCompatRouteImport.update({
+  id: '/api/public/video-compat',
+  path: '/api/public/video-compat',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicMediaStreamRoute = ApiPublicMediaStreamRouteImport.update({
   id: '/api/public/media-stream',
   path: '/api/public/media-stream',
@@ -97,6 +103,7 @@ export interface FileRoutesByFullPath {
   '/api/public/auth-token': typeof ApiPublicAuthTokenRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
+  '/api/public/video-compat': typeof ApiPublicVideoCompatRoute
   '/api/public/xunhupay-notify': typeof ApiPublicXunhupayNotifyRoute
   '/api/recharge/create': typeof ApiRechargeCreateRoute
   '/api/recharge/products': typeof ApiRechargeProductsRoute
@@ -111,6 +118,7 @@ export interface FileRoutesByTo {
   '/api/public/auth-token': typeof ApiPublicAuthTokenRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
+  '/api/public/video-compat': typeof ApiPublicVideoCompatRoute
   '/api/public/xunhupay-notify': typeof ApiPublicXunhupayNotifyRoute
   '/api/recharge/create': typeof ApiRechargeCreateRoute
   '/api/recharge/products': typeof ApiRechargeProductsRoute
@@ -127,6 +135,7 @@ export interface FileRoutesById {
   '/api/public/auth-token': typeof ApiPublicAuthTokenRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
+  '/api/public/video-compat': typeof ApiPublicVideoCompatRoute
   '/api/public/xunhupay-notify': typeof ApiPublicXunhupayNotifyRoute
   '/api/recharge/create': typeof ApiRechargeCreateRoute
   '/api/recharge/products': typeof ApiRechargeProductsRoute
@@ -143,6 +152,7 @@ export interface FileRouteTypes {
     | '/api/public/auth-token'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
+    | '/api/public/video-compat'
     | '/api/public/xunhupay-notify'
     | '/api/recharge/create'
     | '/api/recharge/products'
@@ -157,6 +167,7 @@ export interface FileRouteTypes {
     | '/api/public/auth-token'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
+    | '/api/public/video-compat'
     | '/api/public/xunhupay-notify'
     | '/api/recharge/create'
     | '/api/recharge/products'
@@ -172,6 +183,7 @@ export interface FileRouteTypes {
     | '/api/public/auth-token'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
+    | '/api/public/video-compat'
     | '/api/public/xunhupay-notify'
     | '/api/recharge/create'
     | '/api/recharge/products'
@@ -187,6 +199,7 @@ export interface RootRouteChildren {
   ApiPublicAuthTokenRoute: typeof ApiPublicAuthTokenRoute
   ApiPublicMediaProxyRoute: typeof ApiPublicMediaProxyRoute
   ApiPublicMediaStreamRoute: typeof ApiPublicMediaStreamRoute
+  ApiPublicVideoCompatRoute: typeof ApiPublicVideoCompatRoute
   ApiPublicXunhupayNotifyRoute: typeof ApiPublicXunhupayNotifyRoute
   ApiRechargeCreateRoute: typeof ApiRechargeCreateRoute
   ApiRechargeProductsRoute: typeof ApiRechargeProductsRoute
@@ -265,6 +278,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicXunhupayNotifyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/video-compat': {
+      id: '/api/public/video-compat'
+      path: '/api/public/video-compat'
+      fullPath: '/api/public/video-compat'
+      preLoaderRoute: typeof ApiPublicVideoCompatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/media-stream': {
       id: '/api/public/media-stream'
       path: '/api/public/media-stream'
@@ -310,6 +330,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicAuthTokenRoute: ApiPublicAuthTokenRoute,
   ApiPublicMediaProxyRoute: ApiPublicMediaProxyRoute,
   ApiPublicMediaStreamRoute: ApiPublicMediaStreamRoute,
+  ApiPublicVideoCompatRoute: ApiPublicVideoCompatRoute,
   ApiPublicXunhupayNotifyRoute: ApiPublicXunhupayNotifyRoute,
   ApiRechargeCreateRoute: ApiRechargeCreateRoute,
   ApiRechargeProductsRoute: ApiRechargeProductsRoute,

@@ -35,7 +35,7 @@ ENV PORT=3000
 # yt-dlp (used by youtube-dl-exec for overseas video parsing) is a Python zipapp
 # and requires python3 at runtime. ca-certificates for HTTPS to upstream sites.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 ca-certificates curl \
+  && apt-get install -y --no-install-recommends python3 ca-certificates curl ffmpeg \
   && curl -fsSL -o /usr/local/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
   && chmod +x /usr/local/bin/yt-dlp \
   && apt-get purge -y curl \
