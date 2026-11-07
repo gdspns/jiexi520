@@ -1297,14 +1297,19 @@
                     <button type="button" class="mobile-save-cancel w-full py-2 text-sm text-slate-400">取消</button>
                 </div>`;
             document.body.appendChild(overlay);
+            const activeVideo = document.getElementById('mobile-result-video');
+            const previousVideoDisplay = activeVideo.style.display;
+            activeVideo.pause();
+            activeVideo.style.display = 'none';
+            const restoreVideo = () => { activeVideo.style.display = previousVideoDisplay || 'block'; };
             let cancelled = false;
-            overlay.querySelector('.mobile-save-cancel').addEventListener('click', () => { cancelled = true; overlay.remove(); });
-            overlay.addEventListener('click', (event) => { if (event.target === overlay) { cancelled = true; overlay.remove(); } });
+            overlay.querySelector('.mobile-save-cancel').addEventListener('click', () => { cancelled = true; restoreVideo(); overlay.remove(); });
+            overlay.addEventListener('click', (event) => { if (event.target === overlay) { cancelled = true; restoreVideo(); overlay.remove(); } });
             const card = overlay.firstElementChild;
             const status = overlay.querySelector('.mobile-save-status');
             const progress = overlay.querySelector('.mobile-save-progress');
             try {
-                const response = await fetchWithProgress(url, (percent, received) => {
+                const blob = await fetchVideoInChunks(url, (percent, received) => {
                     if (cancelled) return;
                     if (percent !== null) {
                         progress.style.width = `${Math.min(100, percent)}%`;
@@ -1312,9 +1317,8 @@
                     } else {
                         status.textContent = `已读取 ${(received / 1048576).toFixed(1)} MB`;
                     }
-                }, true);
+                });
                 if (cancelled) return;
-                const blob = await response.blob();
                 const safeName = String(fileName || 'video.mp4').replace(/[\\/:*?"<>|]/g, '').slice(0, 100) || 'video.mp4';
                 const file = new File([blob], safeName.endsWith('.mp4') ? safeName : safeName + '.mp4', { type: 'video/mp4' });
                 const blobUrl = URL.createObjectURL(file);
@@ -1337,7 +1341,7 @@
                     }
                 });
                 card.querySelector('.mobile-open-fallback').addEventListener('click', () => window.open(streamUrl, '_blank', 'noopener'));
-                card.querySelector('.mobile-save-close').addEventListener('click', () => { URL.revokeObjectURL(blobUrl); overlay.remove(); });
+                card.querySelector('.mobile-save-close').addEventListener('click', () => { URL.revokeObjectURL(blobUrl); restoreVideo(); overlay.remove(); });
             } catch (error) {
                 if (cancelled) return;
                 card.innerHTML = `
@@ -1348,8 +1352,53 @@
                         <a class="block w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100" href="${downloadUrl}" target="_blank" rel="noopener">浏览器下载</a>
                         <button type="button" class="mobile-save-close w-full py-2 text-sm text-slate-400">关闭</button>
                     </div>`;
-                card.querySelector('.mobile-save-close').addEventListener('click', () => overlay.remove());
+                card.querySelector('.mobile-save-close').addEventListener('click', () => { restoreVideo(); overlay.remove(); });
             }
+        }
+
+        async function fetchVideoInChunks(url, onProgress) {
+            if (!/^https?:\/\//i.test(url)) {
+                const response = await fetchWithProgress(url, onProgress);
+                return response.blob();
+            }
+            const probe = await fetch(url, {
+                headers: { Range: 'bytes=0-0' },
+                referrerPolicy: 'no-referrer',
+                cache: 'no-store'
+            });
+            if (!probe.ok) throw new Error('视频地址读取失败');
+            const contentRange = probe.headers.get('Content-Range') || '';
+            const total = Number(contentRange.split('/')[1] || probe.headers.get('Content-Length') || 0);
+            if (!total || probe.status === 200) {
+                const blob = await probe.blob();
+                onProgress(100, blob.size);
+                return blob;
+            }
+            const chunkSize = 4 * 1024 * 1024;
+            const chunks = [];
+            let received = 0;
+            for (let start = 0; start < total; start += chunkSize) {
+                const end = Math.min(total - 1, start + chunkSize - 1);
+                let part = null;
+                for (let attempt = 0; attempt < 3 && !part; attempt++) {
+                    try {
+                        const response = await fetch(url, {
+                            headers: { Range: `bytes=${start}-${end}` },
+                            referrerPolicy: 'no-referrer',
+                            cache: 'no-store'
+                        });
+                        if (response.status !== 206) throw new Error('分段响应异常');
+                        part = await response.blob();
+                    } catch (error) {
+                        if (attempt === 2) throw error;
+                        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+                    }
+                }
+                chunks.push(part);
+                received += part.size;
+                onProgress((received / total) * 100, received);
+            }
+            return new Blob(chunks, { type: 'video/mp4' });
         }
 
         async function saveMobileImages(images, indexes = null) {
@@ -1692,7 +1741,14 @@
                         videoReady.style.display = 'flex';
                     }
                 };
-                mobileVideo.src = data.video_url;
+                const ua = navigator.userAgent || '';
+                const isIOSWebKit = /iPhone|iPad|iPod/i.test(ua);
+                const isUCBrowser = /UCBrowser|UCWEB/i.test(ua);
+                const needsIOSCompat = data.platform === '抖音' && isIOSWebKit && !isUCBrowser;
+                mobileVideo.dataset.fallbackUsed = needsIOSCompat ? '1' : '0';
+                mobileVideo.src = needsIOSCompat
+                    ? '/api/public/video-compat?url=' + encodeURIComponent(data.video_url)
+                    : data.video_url;
                 mobileVideo.classList.add('is-ready-source');
                 mobileVideo.style.display = 'block';
                 mobileVideo.load();
