@@ -328,14 +328,51 @@
             #result-container > div:first-child { gap: 13px !important; padding: 12px !important; }
             #video-thumbnail { min-height: 180px; }
             #mobile-result-video {
-                display: block !important;
                 width: 100%;
                 height: 240px;
                 background: #080d18;
                 object-fit: contain;
             }
+            #mobile-result-video.is-ready-source { display: block !important; }
             .result-media-wrap { height: 240px !important; }
             .mobile-video-cover-overlay { display: none !important; }
+            #single-audio-box { display: none !important; }
+            .mobile-video-state {
+                position: absolute;
+                z-index: 4;
+                inset: 0;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 10px;
+                background: rgba(5,10,20,.42);
+                color: #d9e0ef;
+                font-size: 11px;
+                backdrop-filter: blur(2px);
+            }
+            .mobile-video-spinner {
+                width: 34px;
+                height: 34px;
+                border: 3px solid rgba(255,255,255,.18);
+                border-top-color: #4a86ff;
+                border-radius: 50%;
+                animation: mobile-video-spin .85s linear infinite;
+            }
+            .mobile-video-ready {
+                display: none;
+                align-items: center;
+                justify-content: center;
+                width: 58px;
+                height: 58px;
+                border: 1px solid rgba(255,255,255,.5);
+                border-radius: 50%;
+                background: rgba(47,107,255,.92);
+                color: #fff;
+                font-size: 22px;
+                box-shadow: 0 8px 24px rgba(47,107,255,.4);
+            }
+            @keyframes mobile-video-spin { to { transform: rotate(360deg); } }
             #download-video-btn .desktop-video-label { display: none; }
             #download-video-btn .mobile-video-label { display: inline !important; }
             #download-btn { display: none !important; }
@@ -615,7 +652,12 @@
                     <div class="flex flex-col sm:flex-row gap-6 items-start sm:items-center bg-slate-900/50 rounded-2xl p-4 border border-slate-700/50">
                         <div class="result-media-wrap w-full sm:w-36 h-36 bg-slate-800 rounded-xl overflow-hidden relative flex-shrink-0 group ring-1 ring-white/10">
                             <img id="video-thumbnail" src="" alt="封面" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110">
-                            <video id="mobile-result-video" class="hidden" controls playsinline webkit-playsinline preload="metadata"></video>
+                            <video id="mobile-result-video" class="hidden" playsinline webkit-playsinline preload="metadata"></video>
+                            <div id="mobile-video-state" class="mobile-video-state hidden">
+                                <div id="mobile-video-spinner" class="mobile-video-spinner"></div>
+                                <span id="mobile-video-status">视频加载中…</span>
+                                <button id="mobile-video-ready" class="mobile-video-ready" type="button" aria-label="播放视频"><i class="fa-solid fa-play ml-1"></i></button>
+                            </div>
                             <div class="mobile-video-cover-overlay absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm">
                                 <i class="fa-solid fa-music text-white text-3xl drop-shadow-lg"></i>
                             </div>
@@ -1587,24 +1629,65 @@
             document.getElementById('platform-name').textContent = data.platform;
             const mobileVideo = document.getElementById('mobile-result-video');
             const thumbnail = document.getElementById('video-thumbnail');
+            const videoState = document.getElementById('mobile-video-state');
+            const videoSpinner = document.getElementById('mobile-video-spinner');
+            const videoStatus = document.getElementById('mobile-video-status');
+            const videoReady = document.getElementById('mobile-video-ready');
             if (isMobileLayout() && data.video_url) {
                 mobileVideo.poster = data.cover || '';
+                mobileVideo.controls = false;
                 mobileVideo.dataset.fallbackUsed = '0';
+                videoState.classList.remove('hidden');
+                videoSpinner.style.display = 'block';
+                videoStatus.textContent = '视频加载中…';
+                videoStatus.style.display = 'block';
+                videoReady.style.display = 'none';
+                const markVideoReady = () => {
+                    videoSpinner.style.display = 'none';
+                    videoStatus.style.display = 'none';
+                    videoReady.style.display = 'flex';
+                    watchBtn.style.display = 'flex';
+                };
+                mobileVideo.oncanplay = markVideoReady;
+                mobileVideo.onloadeddata = markVideoReady;
+                mobileVideo.onplaying = () => videoState.classList.add('hidden');
                 mobileVideo.onerror = () => {
-                    if (mobileVideo.dataset.fallbackUsed === '1') return;
+                    if (mobileVideo.dataset.fallbackUsed === '1') {
+                        videoSpinner.style.display = 'none';
+                        videoReady.style.display = 'none';
+                        videoStatus.style.display = 'block';
+                        videoStatus.textContent = '视频加载失败，请稍后重试';
+                        return;
+                    }
                     const fallback = data.video_url;
                     mobileVideo.dataset.fallbackUsed = '1';
+                    videoStatus.textContent = '正在切换播放线路…';
                     mobileVideo.src = fallback;
                     mobileVideo.load();
                 };
+                videoReady.onclick = async () => {
+                    videoState.classList.add('hidden');
+                    mobileVideo.controls = true;
+                    try {
+                        await mobileVideo.play();
+                    } catch {
+                        videoState.classList.remove('hidden');
+                        videoStatus.style.display = 'block';
+                        videoStatus.textContent = '播放失败，请重试';
+                        videoReady.style.display = 'flex';
+                    }
+                };
                 mobileVideo.src = proxifyVideo(data.video_url);
+                mobileVideo.classList.add('is-ready-source');
                 mobileVideo.style.display = 'block';
                 mobileVideo.load();
                 thumbnail.style.display = 'none';
             } else {
                 mobileVideo.pause();
                 mobileVideo.removeAttribute('src');
+                mobileVideo.classList.remove('is-ready-source');
                 mobileVideo.style.display = 'none';
+                videoState.classList.add('hidden');
                 thumbnail.style.display = 'block';
             }
             
@@ -1613,13 +1696,14 @@
             const dlAudioBtn = document.getElementById('download-btn');
             const audioBox = document.getElementById('single-audio-box');
             if (data.video_url) {
-                watchBtn.style.display = 'flex'; dlVideoBtn.style.display = 'flex';
+                watchBtn.style.display = isMobileLayout() ? 'none' : 'flex';
+                dlVideoBtn.style.display = 'flex';
             } else {
                 watchBtn.style.display = 'none'; dlVideoBtn.style.display = 'none';
             }
 
             const player = document.getElementById('real-audio-player');
-            if (data.music_url) {
+            if (data.music_url && !isMobileLayout()) {
                 player.src = proxify(data.music_url); player.load();
                 dlAudioBtn.style.display = 'flex';
                 audioBox.style.display = 'flex';
@@ -1913,6 +1997,14 @@
         
         document.getElementById('watch-video-btn').addEventListener('click', () => {
             if (currentSingleData && currentSingleData.video_url) {
+                if (isMobileLayout()) {
+                    const mobileVideo = document.getElementById('mobile-result-video');
+                    mobileVideo.controls = true;
+                    document.getElementById('mobile-video-state').classList.add('hidden');
+                    mobileVideo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    mobileVideo.play().catch(() => showToast('视频尚未准备好，请稍后再试', 'info'));
+                    return;
+                }
                 document.getElementById('real-audio-player').pause();
                 document.getElementById('modal-video-title').textContent = currentSingleData.title;
                 vPlayer.src = proxify(currentSingleData.video_url);
