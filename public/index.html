@@ -302,6 +302,7 @@
             .mobile-video-cover-overlay { display: none !important; }
             #download-video-btn .desktop-video-label { display: none; }
             #download-video-btn .mobile-video-label { display: inline !important; }
+            #download-btn { display: none !important; }
             .mobile-copy-caption { display: flex !important; }
             .mobile-gallery-panel {
                 display: block;
@@ -1185,7 +1186,7 @@
         }
 
         // 手机端视频采用流式保存，避免先把大视频完整读入内存导致 Safari/安卓浏览器无响应。
-        function promptMobileVideoSave(url, fileName) {
+        async function promptMobileVideoSave(url, fileName) {
             const streamUrl = url;
             const proxyUrl = proxify(url);
             const downloadUrl = proxyUrl + (proxyUrl.includes('?') ? '&' : '?') + 'download=1&filename=' + encodeURIComponent(fileName);
@@ -1194,17 +1195,65 @@
             overlay.innerHTML = `
                 <div class="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl text-center">
                     <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-500/20 text-blue-300"><i class="fa-solid fa-video"></i></div>
-                    <h3 class="text-lg font-bold text-white mb-2">保存视频到相册</h3>
-                    <p class="text-sm text-slate-300 mb-4">iPhone：打开视频后点系统分享按钮，选择“存储视频”。安卓可直接下载，或打开视频后长按保存。</p>
-                    <div class="space-y-2">
-                        <a class="block w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white" href="${streamUrl}" target="_blank" rel="noopener">打开视频并保存</a>
-                        <a class="block w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100" href="${downloadUrl}" target="_blank" rel="noopener">下载视频文件</a>
-                        <button type="button" class="mobile-save-cancel w-full py-2 text-sm text-slate-400">取消</button>
-                    </div>
+                    <h3 class="text-lg font-bold text-white mb-2">正在准备视频文件</h3>
+                    <p class="mobile-save-status text-sm text-slate-300 mb-4">正在读取视频，请保持页面打开…</p>
+                    <div class="h-2 overflow-hidden rounded-full bg-slate-800 mb-4"><div class="mobile-save-progress h-full w-0 bg-gradient-to-r from-blue-500 to-indigo-500 transition-all"></div></div>
+                    <button type="button" class="mobile-save-cancel w-full py-2 text-sm text-slate-400">取消</button>
                 </div>`;
             document.body.appendChild(overlay);
-            overlay.querySelector('.mobile-save-cancel').addEventListener('click', () => overlay.remove());
-            overlay.addEventListener('click', (event) => { if (event.target === overlay) overlay.remove(); });
+            let cancelled = false;
+            overlay.querySelector('.mobile-save-cancel').addEventListener('click', () => { cancelled = true; overlay.remove(); });
+            overlay.addEventListener('click', (event) => { if (event.target === overlay) { cancelled = true; overlay.remove(); } });
+            const card = overlay.firstElementChild;
+            const status = overlay.querySelector('.mobile-save-status');
+            const progress = overlay.querySelector('.mobile-save-progress');
+            try {
+                const response = await fetchWithProgress(url, (percent, received) => {
+                    if (cancelled) return;
+                    if (percent !== null) {
+                        progress.style.width = `${Math.min(100, percent)}%`;
+                        status.textContent = `正在准备视频 ${Math.round(percent)}%`;
+                    } else {
+                        status.textContent = `已读取 ${(received / 1048576).toFixed(1)} MB`;
+                    }
+                });
+                if (cancelled) return;
+                const blob = await response.blob();
+                const safeName = String(fileName || 'video.mp4').replace(/[\\/:*?"<>|]/g, '').slice(0, 100) || 'video.mp4';
+                const file = new File([blob], safeName.endsWith('.mp4') ? safeName : safeName + '.mp4', { type: 'video/mp4' });
+                const blobUrl = URL.createObjectURL(file);
+                card.innerHTML = `
+                    <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-green-500/20 text-green-300"><i class="fa-solid fa-check"></i></div>
+                    <h3 class="text-lg font-bold text-white mb-2">视频已准备好</h3>
+                    <p class="text-sm text-slate-300 mb-4">点击下面按钮，在苹果系统菜单中选择“存储视频”。</p>
+                    <div class="space-y-2">
+                        <button type="button" class="mobile-share-file w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white">分享并存储到相册</button>
+                        <a class="block w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100" href="${blobUrl}" download="${file.name}">下载视频文件</a>
+                        <button type="button" class="mobile-open-fallback w-full py-2 text-sm text-slate-400">打开原视频</button>
+                        <button type="button" class="mobile-save-close w-full py-2 text-sm text-slate-500">关闭</button>
+                    </div>`;
+                card.querySelector('.mobile-share-file').addEventListener('click', async () => {
+                    try {
+                        if (!navigator.canShare || !navigator.canShare({ files: [file] })) throw new Error('当前浏览器不支持文件分享');
+                        await navigator.share({ files: [file], title: file.name });
+                    } catch (error) {
+                        if (error?.name !== 'AbortError') showToast('请使用 Safari 打开，或点击“下载视频文件”保存', 'info');
+                    }
+                });
+                card.querySelector('.mobile-open-fallback').addEventListener('click', () => window.open(streamUrl, '_blank', 'noopener'));
+                card.querySelector('.mobile-save-close').addEventListener('click', () => { URL.revokeObjectURL(blobUrl); overlay.remove(); });
+            } catch (error) {
+                if (cancelled) return;
+                card.innerHTML = `
+                    <h3 class="text-lg font-bold text-white mb-2">视频文件准备失败</h3>
+                    <p class="text-sm text-slate-300 mb-4">可尝试打开原视频后长按保存，或使用浏览器下载。</p>
+                    <div class="space-y-2">
+                        <a class="block w-full rounded-xl bg-blue-600 py-3 font-bold text-white" href="${streamUrl}" target="_blank" rel="noopener">打开原视频</a>
+                        <a class="block w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100" href="${downloadUrl}" target="_blank" rel="noopener">浏览器下载</a>
+                        <button type="button" class="mobile-save-close w-full py-2 text-sm text-slate-400">关闭</button>
+                    </div>`;
+                card.querySelector('.mobile-save-close').addEventListener('click', () => overlay.remove());
+            }
         }
 
         async function saveMobileImages(images, indexes = null) {
