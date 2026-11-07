@@ -1769,10 +1769,26 @@
               <div class="mobile-mine-stat"><strong>—</strong><span>剩余次数</span></div>
               <div class="mobile-mine-stat"><strong>已就绪</strong><span>解析服务</span></div>
             </div>
-            <a class="mobile-account-action primary" href="/auth?redirect=${encodeURIComponent('/index.html')}">登录 / 注册</a>
+            <button id="mobile-mine-login" class="mobile-account-action primary" type="button">登录 / 注册</button>
             <button id="mobile-mine-guide" class="mobile-account-action"><i class="fa-solid fa-book-open"></i>使用教程</button>
             <p class="mobile-notice">账户仅用于同步解析次数与订单，不会读取你的社交账号信息。</p>`;
           document.getElementById("mobile-mine-guide")?.addEventListener("click", () => openMobileSheet("mobile-guide-sheet"));
+          document.getElementById("mobile-mine-login")?.addEventListener("click", async (event) => {
+            const button = event.currentTarget;
+            button.disabled = true;
+            button.textContent = "正在检查账户…";
+            try {
+              const { data } = await sb.auth.getUser();
+              if (data?.user) {
+                currentUser = data.user;
+                await refreshAuth();
+                renderMobileMine();
+                showToast && showToast("账号已登录", "success");
+                return;
+              }
+            } catch {}
+            location.href = "/auth?redirect=" + encodeURIComponent("/index.html");
+          });
           return;
         }
         const safeEmail = String(currentUser.email || "已登录用户").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
