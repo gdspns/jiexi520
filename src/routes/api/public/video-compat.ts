@@ -7,7 +7,7 @@ const CORS = {
 };
 
 const MEDIA_HOST_PARTS = [
-  "momocdn.com", "douyinvod.com", "bytecdn", "douyin", "aweme",
+  "momocdn.com", "365yg.com", "douyinvod.com", "bytecdn", "douyin", "aweme",
   "kwimgs.com", "yximgs.com", "kuaishou", "xhscdn.com", "bilivideo.com",
   "hdslb.com", "weibocdn", "sinaimg",
 ];

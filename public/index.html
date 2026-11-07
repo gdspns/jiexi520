@@ -1659,6 +1659,8 @@
                 };
                 mobileVideo.oncanplay = markVideoReady;
                 mobileVideo.onloadeddata = markVideoReady;
+                // iOS Safari 在用户手势播放前通常只预载元数据，不会触发 loadeddata/canplay。
+                mobileVideo.onloadedmetadata = markVideoReady;
                 mobileVideo.onplaying = () => videoState.classList.add('hidden');
                 mobileVideo.onerror = () => {
                     if (mobileVideo.dataset.fallbackUsed === '0' && /^https?:\/\//i.test(data.video_url)) {
@@ -1690,12 +1692,7 @@
                         videoReady.style.display = 'flex';
                     }
                 };
-                // 抖音临时 CDN 地址在 iOS Safari 中经常被跨站媒体策略拒绝；
-                // 解析仍由国内付费 API 直连，仅播放器使用本站 Range 转发。
-                const mobilePlaybackUrl = data.platform === '抖音'
-                    ? proxifyVideo(data.video_url)
-                    : data.video_url;
-                mobileVideo.src = mobilePlaybackUrl;
+                mobileVideo.src = data.video_url;
                 mobileVideo.classList.add('is-ready-source');
                 mobileVideo.style.display = 'block';
                 mobileVideo.load();
