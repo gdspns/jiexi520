@@ -1183,12 +1183,8 @@
             const proxied = proxify(url);
             let response;
             if (preferDirect && /^https?:\/\//i.test(url)) {
-                try {
-                    response = await fetch(url, { referrerPolicy: 'no-referrer' });
-                    if (!response.ok) throw new Error('直连返回 ' + response.status);
-                } catch {
-                    response = await fetch(proxied);
-                }
+                response = await fetch(url, { referrerPolicy: 'no-referrer' });
+                if (!response.ok) throw new Error('直连返回 ' + response.status);
             } else {
                 response = await fetch(proxied);
             }
@@ -1286,8 +1282,10 @@
         // 手机端视频采用流式保存，避免先把大视频完整读入内存导致 Safari/安卓浏览器无响应。
         async function promptMobileVideoSave(url, fileName) {
             const streamUrl = url;
-            const proxyUrl = proxify(url);
-            const downloadUrl = proxyUrl + (proxyUrl.includes('?') ? '&' : '?') + 'download=1&filename=' + encodeURIComponent(fileName);
+            const isOverseasStream = url.startsWith('/api/public/media-stream');
+            const downloadUrl = isOverseasStream
+                ? url + (url.includes('?') ? '&' : '?') + 'download=1&filename=' + encodeURIComponent(fileName)
+                : url;
             const overlay = document.createElement('div');
             overlay.className = 'fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 backdrop-blur-sm px-4';
             overlay.innerHTML = `
@@ -1361,7 +1359,7 @@
             try {
                 const files = [];
                 for (const item of selected) {
-                    const response = await fetch(proxify(item.url));
+                    const response = await fetch(item.url, { referrerPolicy: 'no-referrer' });
                     if (!response.ok) throw new Error('图片下载失败');
                     const blob = await response.blob();
                     const ext = blob.type.includes('png') ? 'png' : blob.type.includes('webp') ? 'webp' : 'jpg';
@@ -1403,7 +1401,8 @@
                 const item = document.createElement('div');
                 item.className = 'mobile-gallery-item';
                 const image = document.createElement('img');
-                image.src = proxify(url);
+                image.src = url;
+                image.referrerPolicy = 'no-referrer';
                 image.alt = `图片 ${index + 1}`;
                 image.addEventListener('click', () => window.open(url, '_blank', 'noopener'));
                 const save = document.createElement('button');
@@ -1662,18 +1661,12 @@
                 mobileVideo.onloadeddata = markVideoReady;
                 mobileVideo.onplaying = () => videoState.classList.add('hidden');
                 mobileVideo.onerror = () => {
-                    if (mobileVideo.dataset.fallbackUsed === '1') {
-                        videoSpinner.style.display = 'none';
-                        videoReady.style.display = 'none';
-                        videoStatus.style.display = 'block';
-                        videoStatus.textContent = '视频加载失败，请稍后重试';
-                        return;
-                    }
-                    const fallback = proxifyVideo(data.video_url);
-                    mobileVideo.dataset.fallbackUsed = '1';
-                    videoStatus.textContent = '正在切换播放线路…';
-                    mobileVideo.src = fallback;
-                    mobileVideo.load();
+                    videoSpinner.style.display = 'none';
+                    videoReady.style.display = 'none';
+                    videoStatus.style.display = 'block';
+                    videoStatus.textContent = data.video_url.startsWith('/api/public/media-stream')
+                        ? '海外视频线路暂时不可用，请稍后重试'
+                        : '视频直链加载失败，请重新解析获取新链接';
                 };
                 videoReady.onclick = async () => {
                     videoState.classList.add('hidden');
