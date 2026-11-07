@@ -1690,7 +1690,12 @@
                         videoReady.style.display = 'flex';
                     }
                 };
-                mobileVideo.src = data.video_url;
+                // 抖音临时 CDN 地址在 iOS Safari 中经常被跨站媒体策略拒绝；
+                // 解析仍由国内付费 API 直连，仅播放器使用本站 Range 转发。
+                const mobilePlaybackUrl = data.platform === '抖音'
+                    ? proxifyVideo(data.video_url)
+                    : data.video_url;
+                mobileVideo.src = mobilePlaybackUrl;
                 mobileVideo.classList.add('is-ready-source');
                 mobileVideo.style.display = 'block';
                 mobileVideo.load();
