@@ -291,6 +291,17 @@
             #result-container { margin-top: 20px !important; padding-top: 17px !important; }
             #result-container > div:first-child { gap: 13px !important; padding: 12px !important; }
             #video-thumbnail { min-height: 180px; }
+            #mobile-result-video {
+                display: block !important;
+                width: 100%;
+                height: 240px;
+                background: #080d18;
+                object-fit: contain;
+            }
+            .result-media-wrap { height: 240px !important; }
+            .mobile-video-cover-overlay { display: none !important; }
+            #download-video-btn .desktop-video-label { display: none; }
+            #download-video-btn .mobile-video-label { display: inline !important; }
             #result-container .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
             #result-container .grid button { min-height: 42px; padding: 8px !important; font-size: 11px; }
             #batch-urls-input { min-height: 150px; font-size: 12px; }
@@ -548,9 +559,10 @@
                 <!-- Single Result Section -->
                 <div id="result-container" class="mt-10 pt-8 border-t border-slate-700 hidden animate-fade-in-up">
                     <div class="flex flex-col sm:flex-row gap-6 items-start sm:items-center bg-slate-900/50 rounded-2xl p-4 border border-slate-700/50">
-                        <div class="w-full sm:w-36 h-36 bg-slate-800 rounded-xl overflow-hidden relative flex-shrink-0 group ring-1 ring-white/10">
+                        <div class="result-media-wrap w-full sm:w-36 h-36 bg-slate-800 rounded-xl overflow-hidden relative flex-shrink-0 group ring-1 ring-white/10">
                             <img id="video-thumbnail" src="" alt="封面" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110">
-                            <div class="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm">
+                            <video id="mobile-result-video" class="hidden" controls playsinline webkit-playsinline preload="metadata"></video>
+                            <div class="mobile-video-cover-overlay absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm">
                                 <i class="fa-solid fa-music text-white text-3xl drop-shadow-lg"></i>
                             </div>
                         </div>
@@ -588,7 +600,7 @@
                             <i class="fa-solid fa-download group-hover:-translate-y-1 transition-transform"></i> 下载真MP3音频
                         </button>
                         <button id="download-video-btn" class="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 text-white font-bold py-3 px-4 rounded-xl shadow-[0_0_15px_rgba(79,70,229,0.4)] transition-all flex items-center justify-center gap-2 group">
-                            <i class="fa-solid fa-video group-hover:-translate-y-1 transition-transform"></i> 下载无水印视频
+                            <i class="fa-solid fa-video group-hover:-translate-y-1 transition-transform"></i> <span class="desktop-video-label">下载无水印视频</span><span class="mobile-video-label hidden">保存到相册</span>
                         </button>
                         <button id="watch-video-btn" class="bg-slate-800 hover:bg-slate-700 text-primary-400 border border-primary-500/30 font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2">
                             <i class="fa-solid fa-play"></i> 在线观看
@@ -988,6 +1000,7 @@
 
         // ================= 全局状态 =================
         let currentSingleData = null;
+        const isMobileLayout = () => window.matchMedia('(max-width: 640px)').matches;
         let batchResultsData = []; 
 
         // ================= 通用工具函数 =================
@@ -1145,6 +1158,28 @@
             if (progressCallback) progressCallback(100);
             
             return new Blob(mp3Data, { type: 'audio/mpeg' });
+        }
+
+        // 手机端视频采用流式保存，避免先把大视频完整读入内存导致 Safari/安卓浏览器无响应。
+        function promptMobileVideoSave(url, fileName) {
+            const streamUrl = proxify(url);
+            const downloadUrl = streamUrl + (streamUrl.includes('?') ? '&' : '?') + 'download=1&filename=' + encodeURIComponent(fileName);
+            const overlay = document.createElement('div');
+            overlay.className = 'fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 backdrop-blur-sm px-4';
+            overlay.innerHTML = `
+                <div class="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl text-center">
+                    <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-500/20 text-blue-300"><i class="fa-solid fa-video"></i></div>
+                    <h3 class="text-lg font-bold text-white mb-2">保存视频到相册</h3>
+                    <p class="text-sm text-slate-300 mb-4">iPhone：打开视频后点系统分享按钮，选择“存储视频”。安卓可直接下载，或打开视频后长按保存。</p>
+                    <div class="space-y-2">
+                        <a class="block w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white" href="${streamUrl}" target="_blank" rel="noopener">打开视频并保存</a>
+                        <a class="block w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100" href="${downloadUrl}" target="_blank" rel="noopener">下载视频文件</a>
+                        <button type="button" class="mobile-save-cancel w-full py-2 text-sm text-slate-400">取消</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+            overlay.querySelector('.mobile-save-cancel').addEventListener('click', () => overlay.remove());
+            overlay.addEventListener('click', (event) => { if (event.target === overlay) overlay.remove(); });
         }
 
         // 通用下载包装器（包含进度条显示）
@@ -1323,6 +1358,7 @@
         const singleForm = document.getElementById('convert-form');
         const singleUrlInput = document.getElementById('url-input');
         const singleClearBtn = document.getElementById('clear-btn');
+        document.getElementById('btn-text').textContent = isMobileLayout() ? '开始解析' : '解析音频';
         
         singleUrlInput.addEventListener('input', e => {
             e.target.value.length > 0 ? singleClearBtn.classList.remove('hidden') : singleClearBtn.classList.add('hidden');
@@ -1350,7 +1386,7 @@
                 showToast(err.message, 'error');
             } finally {
                 document.getElementById('submit-btn').disabled = false;
-                document.getElementById('btn-text').textContent = '解析音频';
+                document.getElementById('btn-text').textContent = isMobileLayout() ? '开始解析' : '解析音频';
                 document.getElementById('loading-container').classList.add('hidden');
                 document.getElementById('loading-container').classList.remove('flex');
             }
@@ -1360,6 +1396,20 @@
             document.getElementById('video-title').textContent = data.title;
             document.getElementById('video-thumbnail').src = data.cover;
             document.getElementById('platform-name').textContent = data.platform;
+            const mobileVideo = document.getElementById('mobile-result-video');
+            const thumbnail = document.getElementById('video-thumbnail');
+            if (isMobileLayout() && data.video_url) {
+                mobileVideo.poster = data.cover || '';
+                mobileVideo.src = proxify(data.video_url);
+                mobileVideo.style.display = 'block';
+                mobileVideo.load();
+                thumbnail.style.display = 'none';
+            } else {
+                mobileVideo.pause();
+                mobileVideo.removeAttribute('src');
+                mobileVideo.style.display = 'none';
+                thumbnail.style.display = 'block';
+            }
             
             const watchBtn = document.getElementById('watch-video-btn');
             const dlVideoBtn = document.getElementById('download-video-btn');
@@ -1384,7 +1434,13 @@
             if(currentSingleData) downloadMedia(currentSingleData.music_url, (currentSingleData.title || 'audio') + '.mp3', true, e.currentTarget);
         });
         document.getElementById('download-video-btn').addEventListener('click', (e) => {
-            if(currentSingleData && currentSingleData.video_url) downloadMedia(currentSingleData.video_url, (currentSingleData.title || 'video') + '.mp4', false, e.currentTarget);
+            if (!currentSingleData || !currentSingleData.video_url) return;
+            const fileName = (currentSingleData.title || 'video') + '.mp4';
+            if (isMobileLayout()) {
+                promptMobileVideoSave(currentSingleData.video_url, fileName);
+                return;
+            }
+            downloadMedia(currentSingleData.video_url, fileName, false, e.currentTarget);
         });
         function copySingleAudioUrl() {
             if(currentSingleData) copyToClipboard(currentSingleData.music_url);
