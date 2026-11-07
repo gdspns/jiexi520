@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/auth")({
@@ -16,15 +16,6 @@ function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) {
-        const sp = new URLSearchParams(window.location.search);
-        window.location.replace(sp.get("redirect") || "/index.html");
-      }
-    });
-  }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
