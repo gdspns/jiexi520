@@ -127,6 +127,215 @@
             #video-modal-content { max-width: 100vw; margin: 0 8px; }
             #video-modal-content > div[style*="75vh"] { height: 50vh !important; }
         }
+
+        /* 移动端采用附件中「视频保存助手」模板；桌面端完全不进入这些规则 */
+        .mobile-template, .mobile-bottom-nav, .mobile-paste-btn { display: none; }
+        @media (max-width: 640px) {
+            html { background: #0e1220; }
+            body {
+                display: block !important;
+                min-height: 100vh;
+                padding: 0 0 86px !important;
+                background:
+                    radial-gradient(130% 70% at 50% -15%, rgba(74, 134, 255, .2), transparent 60%),
+                    #0e1220;
+            }
+            main {
+                width: 100% !important;
+                max-width: none !important;
+                margin: 58px 0 0 !important;
+                padding: 0 12px;
+            }
+            main > .absolute { display: none; }
+            .desktop-hero-header { display: none !important; }
+            .mobile-template { display: block; position: relative; z-index: 10; }
+            .mobile-brand {
+                padding: 16px 8px 20px;
+                text-align: center;
+            }
+            .mobile-brand-title {
+                color: #fff;
+                font-size: 22px;
+                font-weight: 700;
+                letter-spacing: .04em;
+            }
+            .mobile-brand-sub {
+                display: block;
+                margin-top: 7px;
+                color: #8a96af;
+                font-size: 12px;
+            }
+            .mobile-service-pill {
+                display: inline-flex;
+                align-items: center;
+                gap: 7px;
+                margin-bottom: 12px;
+                padding: 5px 11px;
+                border: 1px solid rgba(77,130,255,.25);
+                border-radius: 999px;
+                background: rgba(77,130,255,.1);
+                color: #93b4ff;
+                font-size: 10px;
+            }
+            .mobile-service-pill::before {
+                content: '';
+                width: 6px;
+                height: 6px;
+                border-radius: 50%;
+                background: #45d783;
+                box-shadow: 0 0 8px rgba(69,215,131,.8);
+            }
+            .mobile-ad-placeholder {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                min-height: 54px;
+                margin-bottom: 12px;
+                padding: 0 16px;
+                border: 1px solid rgba(255,255,255,.06);
+                border-radius: 14px;
+                background: linear-gradient(135deg, #182239, #161d30);
+                color: #d9e0ef;
+                font-size: 12px;
+            }
+            .mobile-ad-placeholder span:last-child { color: #6f9bff; font-size: 11px; }
+            .mobile-quick-grid {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 9px;
+                margin: 14px 0 18px;
+            }
+            .mobile-quick-card {
+                position: relative;
+                min-height: 70px;
+                padding: 13px 12px;
+                overflow: hidden;
+                border: 1px solid rgba(255,255,255,.08);
+                border-radius: 14px;
+                color: #fff;
+                text-align: left;
+                box-shadow: 0 8px 18px rgba(0,0,0,.16);
+            }
+            .mobile-quick-card strong { display: block; font-size: 14px; }
+            .mobile-quick-card small { display: block; margin-top: 5px; opacity: .82; font-size: 10px; }
+            .mobile-quick-card i { position: absolute; right: 12px; bottom: 12px; font-size: 20px; opacity: .86; }
+            .mobile-quick-card.green { background: linear-gradient(135deg, #45cb74, #2aa958); }
+            .mobile-quick-card.cyan { background: linear-gradient(135deg, #35bdef, #1789c6); }
+            .mobile-quick-card.purple { background: linear-gradient(135deg, #9166f8, #6a3cf0); }
+            .mobile-quick-card.pink { background: linear-gradient(135deg, #e5589f, #c02a86); }
+
+            /* 网站主功能卡仅在手机上转换成小程序模板的卡片结构 */
+            .glass-panel {
+                padding: 12px !important;
+                border: 1px solid rgba(255,255,255,.07) !important;
+                border-radius: 16px !important;
+                background: #171e30 !important;
+                box-shadow: 0 12px 30px rgba(0,0,0,.28) !important;
+                backdrop-filter: none;
+            }
+            .glass-panel > .flex.border-b {
+                margin-bottom: 13px !important;
+                padding: 3px;
+                border: 0 !important;
+                border-radius: 11px;
+                background: #111827;
+            }
+            #tab-link-btn, #tab-batch-btn, #tab-local-btn {
+                padding: 9px 5px !important;
+                border: 0 !important;
+                border-radius: 8px;
+                font-size: 11px !important;
+            }
+            #tab-link-btn.text-white, #tab-batch-btn.text-white, #tab-local-btn.text-white {
+                background: #2f6bff;
+                box-shadow: 0 4px 12px rgba(47,107,255,.24);
+            }
+            #convert-form > .flex {
+                display: grid !important;
+                grid-template-columns: minmax(0, 1fr) 82px;
+                gap: 9px !important;
+            }
+            #convert-form > .flex > .relative {
+                grid-column: 1 / -1;
+            }
+            #url-input {
+                min-height: 48px;
+                padding-top: 11px !important;
+                padding-bottom: 11px !important;
+                border-color: rgba(69,215,131,.35) !important;
+                border-radius: 11px !important;
+                background: #0f1526 !important;
+                font-size: 13px !important;
+            }
+            #submit-btn {
+                min-height: 45px;
+                padding: 0 12px !important;
+                border-radius: 11px !important;
+                background: linear-gradient(135deg, #ffa952, #ff7c2b) !important;
+                box-shadow: 0 7px 16px rgba(255,124,43,.25) !important;
+                font-size: 13px;
+            }
+            .mobile-paste-btn {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 45px;
+                border: 0;
+                border-radius: 11px;
+                background: linear-gradient(135deg, #45d783, #1eb463);
+                color: #fff;
+                font-size: 13px;
+                font-weight: 600;
+                box-shadow: 0 7px 16px rgba(30,180,99,.22);
+            }
+            #result-container { margin-top: 20px !important; padding-top: 17px !important; }
+            #result-container > div:first-child { gap: 13px !important; padding: 12px !important; }
+            #video-thumbnail { min-height: 180px; }
+            #result-container .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+            #result-container .grid button { min-height: 42px; padding: 8px !important; font-size: 11px; }
+            #batch-urls-input { min-height: 150px; font-size: 12px; }
+            #batch-submit-btn { padding: 10px 14px !important; font-size: 12px; }
+            #drop-zone { padding: 28px 14px !important; }
+
+            #platforms-section { margin-top: 20px !important; padding-top: 18px !important; }
+            #platforms-section > .grid { grid-template-columns: repeat(4, minmax(0,1fr)) !important; gap: 7px !important; }
+            #platforms-section > .grid > div { padding: 8px 3px !important; }
+            #platforms-section > .grid > div > div { width: 32px !important; height: 32px !important; }
+            #info-section, #seo-keywords { display: none; }
+
+            .mobile-bottom-nav {
+                position: fixed;
+                z-index: 9990;
+                right: 0;
+                bottom: 0;
+                left: 0;
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                padding: 8px 8px calc(7px + env(safe-area-inset-bottom));
+                border-top: 1px solid rgba(255,255,255,.07);
+                background: rgba(17,23,38,.96);
+                backdrop-filter: blur(14px);
+            }
+            .mobile-bottom-nav button {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 3px;
+                border: 0;
+                background: transparent;
+                color: #6b7690;
+                font-size: 10px;
+            }
+            .mobile-bottom-nav button i { font-size: 17px; }
+            .mobile-bottom-nav button:first-child { color: #5b8cff; }
+            #auth-bar {
+                justify-content: center !important;
+                padding: 4px;
+                border-radius: 0 0 12px 12px;
+                background: rgba(14,18,32,.95);
+                backdrop-filter: blur(12px);
+            }
+        }
     </style>
 </head>
 <body class="antialiased font-sans flex flex-col items-center p-4 sm:p-8">
@@ -137,8 +346,18 @@
         <div class="absolute -top-32 -left-32 w-96 h-96 bg-pink-600 rounded-full mix-blend-screen filter blur-[100px] opacity-20 animate-pulse-slow pointer-events-none"></div>
         <div class="absolute -top-32 -right-32 w-96 h-96 bg-purple-600 rounded-full mix-blend-screen filter blur-[100px] opacity-20 animate-pulse-slow pointer-events-none" style="animation-delay: 2s;"></div>
 
+        <!-- 手机模板头部：仅移动端显示 -->
+        <div class="mobile-template">
+            <div class="mobile-brand">
+                <div class="mobile-service-pill">解析服务运行正常</div>
+                <h1 class="mobile-brand-title">视频保存助手</h1>
+                <span class="mobile-brand-sub">视频、图集与音频素材一站式解析</span>
+            </div>
+            <div class="mobile-ad-placeholder"><span>高清素材解析 · 支持 100+ 平台</span><span>安全稳定</span></div>
+        </div>
+
         <!-- Header -->
-        <div class="text-center mb-10 relative z-10">
+        <div class="desktop-hero-header text-center mb-10 relative z-10">
             <div class="inline-flex items-center justify-center gap-2 px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs font-medium text-primary-400 mb-6">
                 <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
                 v4.0 代理引擎升级 | 沉浸式无弹窗
@@ -185,6 +404,7 @@
                             <i id="btn-icon" class="fa-solid fa-arrow-right"></i>
                             <span id="btn-loader" class="loader hidden"></span>
                         </button>
+                        <button type="button" class="mobile-paste-btn" onclick="navigator.clipboard.readText().then(t=>{document.getElementById('url-input').value=t;document.getElementById('url-input').dispatchEvent(new Event('input',{bubbles:true}))}).catch(()=>document.getElementById('url-input').focus())">粘贴</button>
                     </div>
                 </form>
 
@@ -321,6 +541,13 @@
                     </div>
                 </div>
             </div>
+
+        <div class="mobile-template mobile-quick-grid">
+            <button class="mobile-quick-card green" onclick="document.getElementById('platforms-section')?.scrollIntoView({behavior:'smooth'})"><strong>使用教程</strong><small>查看解析与保存方法</small><i class="fa-solid fa-book-open"></i></button>
+            <button class="mobile-quick-card cyan" onclick="document.getElementById('tab-link-btn').click();document.getElementById('url-input').focus()"><strong>短视频解析</strong><small>粘贴链接立即处理</small><i class="fa-solid fa-video"></i></button>
+            <button class="mobile-quick-card purple" onclick="document.getElementById('tab-batch-btn').click()"><strong>批量解析</strong><small>多条链接一起处理</small><i class="fa-solid fa-layer-group"></i></button>
+            <button class="mobile-quick-card pink" onclick="document.getElementById('tab-local-btn').click()"><strong>本地转换</strong><small>本地视频提取音频</small><i class="fa-solid fa-file-audio"></i></button>
+        </div>
 
         <!-- ================= 支持平台 & 搬运介绍 ================= -->
         <div id="platforms-section" class="mt-12 pt-10 border-t border-slate-700/50">
@@ -555,6 +782,12 @@
         </section>
         
     </main>
+
+    <nav class="mobile-bottom-nav" aria-label="移动端快捷导航">
+        <button type="button" onclick="window.scrollTo({top:0,behavior:'smooth'})"><i class="fa-solid fa-house"></i><span>首页</span></button>
+        <button type="button" onclick="document.getElementById('tab-batch-btn').click();window.scrollTo({top:160,behavior:'smooth'})"><i class="fa-solid fa-layer-group"></i><span>批量</span></button>
+        <button type="button" onclick="document.getElementById('auth-bar').scrollIntoView({behavior:'smooth'})"><i class="fa-solid fa-user"></i><span>我的</span></button>
+    </nav>
 
     <!-- Video Player Modal -->
     <div id="video-modal" class="fixed inset-0 z-[100] hidden items-center justify-center bg-black/80 backdrop-blur-sm opacity-0 transition-opacity duration-300">
@@ -950,7 +1183,7 @@
 
         function renderSingleResult(data) {
             document.getElementById('video-title').textContent = data.title;
-            document.getElementById('video-thumbnail').src = proxify(data.cover);
+            document.getElementById('video-thumbnail').src = data.cover;
             document.getElementById('platform-name').textContent = data.platform;
             
             const watchBtn = document.getElementById('watch-video-btn');
@@ -1072,7 +1305,7 @@
                 
                 div.innerHTML = `
                     <div class="w-12 h-12 rounded bg-slate-700 flex-shrink-0 overflow-hidden relative">
-                        <img src="${proxify(data.cover)}" class="w-full h-full object-cover">
+                        <img src="${data.cover}" class="w-full h-full object-cover">
                     </div>
                     <div class="flex-grow min-w-0">
                         <h4 class="text-white text-sm font-medium truncate">${data.title}</h4>
@@ -1322,10 +1555,9 @@
     </div>
     <!-- ============ 登录鉴权层 ============ -->
     <div id="auth-bar" style="position:fixed;top:12px;right:12px;z-index:9999;display:flex;gap:8px;align-items:center;font-family:Inter,sans-serif;"></div>
-    <script src="/vendor/supabase.js"></script>
-    <script>
-      const { createClient } = window.supabase;
-      const SUPABASE_URL = `${window.location.origin}/supabase`;
+    <script type="module">
+      import { createClient } from "https://esm.sh/@supabase/supabase-js@2.106.2";
+      const SUPABASE_URL = "https://cbxenoebinlmdmaqelyv.supabase.co";
       const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNieGVub2ViaW5sbWRtYXFlbHl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0MDcyNzAsImV4cCI6MjA5NTk4MzI3MH0.s8NuyIZSkaVqkAm63RV3nrg60Jyiu9i4mPg13MxfGLU";
       const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
         auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage: localStorage }
