@@ -302,6 +302,22 @@
             .mobile-video-cover-overlay { display: none !important; }
             #download-video-btn .desktop-video-label { display: none; }
             #download-video-btn .mobile-video-label { display: inline !important; }
+            .mobile-copy-caption { display: flex !important; }
+            .mobile-gallery-panel {
+                display: block;
+                margin-top: 16px;
+                padding: 13px;
+                border: 1px solid rgba(255,255,255,.07);
+                border-radius: 15px;
+                background: #171e30;
+            }
+            .mobile-gallery-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 11px; }
+            .mobile-gallery-head strong { color: #e8ecf6; font-size: 13px; }
+            .mobile-gallery-save-all { border: 0; border-radius: 999px; background: #2f6bff; color: #fff; padding: 7px 12px; font-size: 10px; font-weight: 700; }
+            .mobile-gallery-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 9px; }
+            .mobile-gallery-item { overflow: hidden; border: 1px solid rgba(255,255,255,.07); border-radius: 12px; background: #0f1526; }
+            .mobile-gallery-item img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
+            .mobile-gallery-item button { width: 100%; padding: 9px 4px; border: 0; background: #1f2842; color: #d5ddec; font-size: 10px; font-weight: 600; }
             #result-container .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
             #result-container .grid button { min-height: 42px; padding: 8px !important; font-size: 11px; }
             #batch-urls-input { min-height: 150px; font-size: 12px; }
@@ -574,7 +590,7 @@
                             </div>
                             
                             <!-- Single Audio Player -->
-                            <div class="flex items-center gap-4 bg-slate-800 p-3 rounded-xl border border-slate-700 shadow-inner">
+                            <div id="single-audio-box" class="flex items-center gap-4 bg-slate-800 p-3 rounded-xl border border-slate-700 shadow-inner">
                                 <button id="play-pause-btn" class="w-12 h-12 rounded-full bg-primary-500 hover:bg-primary-600 text-white flex items-center justify-center transition-all shadow-[0_0_10px_rgba(236,72,153,0.3)] flex-shrink-0 focus:outline-none">
                                     <i class="fa-solid fa-play ml-1"></i>
                                 </button>
@@ -595,6 +611,10 @@
                     </div>
 
                     <!-- Single Actions -->
+                    <div id="mobile-gallery-panel" class="mobile-gallery-panel hidden">
+                        <div class="mobile-gallery-head"><strong id="mobile-gallery-count">图集</strong><button id="mobile-gallery-save-all" class="mobile-gallery-save-all" type="button">一键批量保存</button></div>
+                        <div id="mobile-gallery-grid" class="mobile-gallery-grid"></div>
+                    </div>
                     <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                         <button id="download-btn" class="bg-white hover:bg-slate-200 text-slate-900 font-bold py-3 px-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 group">
                             <i class="fa-solid fa-download group-hover:-translate-y-1 transition-transform"></i> 下载真MP3音频
@@ -607,6 +627,9 @@
                         </button>
                         <button id="copy-link-btn" onclick="copySingleAudioUrl()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-medium py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2">
                             <i class="fa-regular fa-copy"></i> <span id="copy-text">复制直链</span>
+                        </button>
+                        <button id="copy-caption-btn" class="mobile-copy-caption hidden bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-medium py-3 px-4 rounded-xl transition-colors items-center justify-center gap-2">
+                            <i class="fa-regular fa-clipboard"></i> 复制文案
                         </button>
                     </div>
                 </div>
@@ -1060,6 +1083,7 @@
                 cover: data.cover || 'https://placehold.co/200x200/1e293b/94a3b8?text=No+Cover',
                 music_url: data.music_url,
                 video_url: data.video_url,
+                images: Array.isArray(data.images) ? data.images : [],
                 original_url: data.original_url || url,
                 platform: data.platform || determinePlatform(url),
             };
@@ -1162,8 +1186,9 @@
 
         // 手机端视频采用流式保存，避免先把大视频完整读入内存导致 Safari/安卓浏览器无响应。
         function promptMobileVideoSave(url, fileName) {
-            const streamUrl = proxify(url);
-            const downloadUrl = streamUrl + (streamUrl.includes('?') ? '&' : '?') + 'download=1&filename=' + encodeURIComponent(fileName);
+            const streamUrl = url;
+            const proxyUrl = proxify(url);
+            const downloadUrl = proxyUrl + (proxyUrl.includes('?') ? '&' : '?') + 'download=1&filename=' + encodeURIComponent(fileName);
             const overlay = document.createElement('div');
             overlay.className = 'fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 backdrop-blur-sm px-4';
             overlay.innerHTML = `
@@ -1180,6 +1205,69 @@
             document.body.appendChild(overlay);
             overlay.querySelector('.mobile-save-cancel').addEventListener('click', () => overlay.remove());
             overlay.addEventListener('click', (event) => { if (event.target === overlay) overlay.remove(); });
+        }
+
+        async function saveMobileImages(images, indexes = null) {
+            const selected = (indexes || images.map((_, index) => index)).map(index => ({ url: images[index], index }));
+            if (!selected.length) return;
+            showToast(`正在准备 ${selected.length} 张图片…`, 'info');
+            try {
+                const files = [];
+                for (const item of selected) {
+                    const response = await fetch(proxify(item.url));
+                    if (!response.ok) throw new Error('图片下载失败');
+                    const blob = await response.blob();
+                    const ext = blob.type.includes('png') ? 'png' : blob.type.includes('webp') ? 'webp' : 'jpg';
+                    files.push(new File([blob], `image-${item.index + 1}.${ext}`, { type: blob.type || 'image/jpeg' }));
+                }
+                if (navigator.canShare && navigator.canShare({ files })) {
+                    await navigator.share({ files, title: '保存图片' });
+                    showToast('已调起系统保存，请选择“存储图像”', 'success');
+                    return;
+                }
+                files.forEach(file => {
+                    const blobUrl = URL.createObjectURL(file);
+                    const link = document.createElement('a');
+                    link.href = blobUrl;
+                    link.download = file.name;
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+                });
+                showToast(`已开始保存 ${files.length} 张图片`, 'success');
+            } catch (error) {
+                if (error?.name === 'AbortError') return;
+                showToast(error?.message || '图片保存失败，请点开图片后长按保存', 'error');
+            }
+        }
+
+        function renderMobileGallery(images) {
+            const panel = document.getElementById('mobile-gallery-panel');
+            const grid = document.getElementById('mobile-gallery-grid');
+            const count = document.getElementById('mobile-gallery-count');
+            grid.innerHTML = '';
+            if (!isMobileLayout() || !images.length) {
+                panel.classList.add('hidden');
+                return;
+            }
+            count.textContent = `图集 · 共 ${images.length} 张`;
+            images.forEach((url, index) => {
+                const item = document.createElement('div');
+                item.className = 'mobile-gallery-item';
+                const image = document.createElement('img');
+                image.src = proxify(url);
+                image.alt = `图片 ${index + 1}`;
+                image.addEventListener('click', () => window.open(url, '_blank', 'noopener'));
+                const save = document.createElement('button');
+                save.type = 'button';
+                save.textContent = `保存第 ${index + 1} 张`;
+                save.addEventListener('click', () => saveMobileImages(images, [index]));
+                item.append(image, save);
+                grid.appendChild(item);
+            });
+            document.getElementById('mobile-gallery-save-all').onclick = () => saveMobileImages(images);
+            panel.classList.remove('hidden');
         }
 
         // 通用下载包装器（包含进度条显示）
@@ -1400,7 +1488,16 @@
             const thumbnail = document.getElementById('video-thumbnail');
             if (isMobileLayout() && data.video_url) {
                 mobileVideo.poster = data.cover || '';
-                mobileVideo.src = proxify(data.video_url);
+                mobileVideo.dataset.fallbackUsed = '0';
+                mobileVideo.onerror = () => {
+                    if (mobileVideo.dataset.fallbackUsed === '1') return;
+                    const fallback = proxify(data.video_url);
+                    if (fallback === mobileVideo.src || fallback === data.video_url) return;
+                    mobileVideo.dataset.fallbackUsed = '1';
+                    mobileVideo.src = fallback;
+                    mobileVideo.load();
+                };
+                mobileVideo.src = data.video_url;
                 mobileVideo.style.display = 'block';
                 mobileVideo.load();
                 thumbnail.style.display = 'none';
@@ -1413,6 +1510,8 @@
             
             const watchBtn = document.getElementById('watch-video-btn');
             const dlVideoBtn = document.getElementById('download-video-btn');
+            const dlAudioBtn = document.getElementById('download-btn');
+            const audioBox = document.getElementById('single-audio-box');
             if (data.video_url) {
                 watchBtn.style.display = 'flex'; dlVideoBtn.style.display = 'flex';
             } else {
@@ -1420,9 +1519,19 @@
             }
 
             const player = document.getElementById('real-audio-player');
-            player.src = proxify(data.music_url); player.load();
+            if (data.music_url) {
+                player.src = proxify(data.music_url); player.load();
+                dlAudioBtn.style.display = 'flex';
+                audioBox.style.display = 'flex';
+            } else {
+                player.pause();
+                player.removeAttribute('src');
+                dlAudioBtn.style.display = 'none';
+                audioBox.style.display = 'none';
+            }
             document.getElementById('play-pause-btn').querySelector('i').className = 'fa-solid fa-play ml-1';
             document.getElementById('audio-progress').style.width = '0%';
+            renderMobileGallery(data.images || []);
             
             document.getElementById('result-container').classList.remove('hidden');
             document.getElementById('result-container').classList.add('animate-fade-in-up');
@@ -1443,8 +1552,13 @@
             downloadMedia(currentSingleData.video_url, fileName, false, e.currentTarget);
         });
         function copySingleAudioUrl() {
-            if(currentSingleData) copyToClipboard(currentSingleData.music_url);
+            if (!currentSingleData) return;
+            copyToClipboard(currentSingleData.music_url || currentSingleData.video_url || currentSingleData.images?.[0] || '');
         }
+        document.getElementById('copy-caption-btn').addEventListener('click', () => {
+            if (!currentSingleData?.title) return showToast('没有可复制的文案', 'error');
+            copyToClipboard(currentSingleData.title);
+        });
 
         const pBtn = document.getElementById('play-pause-btn');
         const player = document.getElementById('real-audio-player');

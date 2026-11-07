@@ -160,13 +160,25 @@ async function parseDomestic(url: string, endpoint: string, token: string) {
   const data: any = await res.json();
   if (data.code !== 200 || !data.data) throw new Error(data.msg || "解析失败");
   const d = data.data;
+  const rawImages = d.images || d.image_list || d.pic_list || d.pics || d.photos || [];
+  const images = Array.isArray(rawImages)
+    ? rawImages
+        .map((item: any) => {
+          if (typeof item === "string") return item;
+          if (Array.isArray(item?.url_list)) return item.url_list[0] || "";
+          return item?.url || item?.download_url || "";
+        })
+        .filter(Boolean)
+        .map((item: string) => item.replace(/^http:\/\//i, "https://"))
+    : [];
   const music = d.music_url || d.audio_url || d.video_url;
-  if (!music) throw new Error("无有效媒体链接");
+  if (!music && !images.length) throw new Error("无有效媒体链接");
   return {
     title: d.title || "提取的文件",
-    cover: d.cover || "",
-    music_url: music,
+    cover: d.cover || images[0] || "",
+    music_url: music || "",
     video_url: d.video_url || "",
+    images,
     original_url: url,
     platform: determinePlatform(url),
   };
@@ -251,6 +263,7 @@ async function parseOverseas(url: string, proxy: string) {
         cover: info.thumbnail || "",
         music_url: streamUrl(url, "audio"),
         video_url: streamUrl(url, "video"),
+        images: [],
         original_url: url,
         platform: determinePlatform(url),
       };
