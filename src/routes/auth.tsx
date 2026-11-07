@@ -44,8 +44,11 @@ function AuthPage() {
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        setMsg("登录成功，即将返回首页…");
         const sp = new URLSearchParams(window.location.search);
-        window.location.replace(sp.get("redirect") || "/index.html");
+        const redirect = sp.get("redirect") || "/index.html";
+        await new Promise((resolve) => window.setTimeout(resolve, 900));
+        window.location.replace(redirect);
       }
     } catch (e: any) {
       setErr(e?.message || "操作失败");

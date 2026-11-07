@@ -135,7 +135,7 @@
             body {
                 display: block !important;
                 min-height: 100vh;
-                padding: 0 0 86px !important;
+                padding: 68px 0 24px !important;
                 background:
                     radial-gradient(130% 70% at 50% -15%, rgba(74, 134, 255, .2), transparent 60%),
                     #0e1220;
@@ -143,7 +143,7 @@
             main {
                 width: 100% !important;
                 max-width: none !important;
-                margin: 58px 0 0 !important;
+                margin: 0 !important;
                 padding: 0 12px;
             }
             main > .absolute { display: none; }
@@ -307,14 +307,15 @@
                 position: fixed;
                 z-index: 9990;
                 right: 0;
-                bottom: 0;
+                top: 0;
                 left: 0;
                 display: grid;
                 grid-template-columns: repeat(3, 1fr);
-                padding: 8px 8px calc(7px + env(safe-area-inset-bottom));
-                border-top: 1px solid rgba(255,255,255,.07);
+                padding: calc(7px + env(safe-area-inset-top)) 8px 8px;
+                border-bottom: 1px solid rgba(255,255,255,.07);
                 background: rgba(17,23,38,.96);
                 backdrop-filter: blur(14px);
+                box-shadow: 0 8px 24px rgba(0,0,0,.2);
             }
             .mobile-bottom-nav button {
                 display: flex;
@@ -342,18 +343,18 @@
             .mobile-sheet {
                 position: fixed;
                 z-index: 10021;
+                top: 0;
                 right: 0;
-                bottom: 0;
                 left: 0;
-                max-height: 86vh;
-                padding: 18px 16px calc(22px + env(safe-area-inset-bottom));
+                max-height: 100vh;
+                padding: calc(18px + env(safe-area-inset-top)) 16px 24px;
                 overflow-y: auto;
                 border: 1px solid rgba(255,255,255,.08);
-                border-bottom: 0;
-                border-radius: 22px 22px 0 0;
+                border-top: 0;
+                border-radius: 0 0 22px 22px;
                 background: #111827;
-                box-shadow: 0 -24px 60px rgba(0,0,0,.42);
-                transform: translateY(102%);
+                box-shadow: 0 24px 60px rgba(0,0,0,.42);
+                transform: translateY(-102%);
                 transition: transform .25s ease;
             }
             .mobile-sheet.is-open { display: block; transform: translateY(0); }
@@ -1768,7 +1769,7 @@
               <div class="mobile-mine-stat"><strong>—</strong><span>剩余次数</span></div>
               <div class="mobile-mine-stat"><strong>已就绪</strong><span>解析服务</span></div>
             </div>
-            <a class="mobile-account-action primary" href="/auth?redirect=${encodeURIComponent(location.pathname + '?panel=mine')}">登录 / 注册</a>
+            <a class="mobile-account-action primary" href="/auth?redirect=${encodeURIComponent('/index.html')}">登录 / 注册</a>
             <button id="mobile-mine-guide" class="mobile-account-action"><i class="fa-solid fa-book-open"></i>使用教程</button>
             <p class="mobile-notice">账户仅用于同步解析次数与订单，不会读取你的社交账号信息。</p>`;
           document.getElementById("mobile-mine-guide")?.addEventListener("click", () => openMobileSheet("mobile-guide-sheet"));
