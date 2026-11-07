@@ -42,6 +42,24 @@ function determinePlatform(url: string): string {
   return "通用";
 }
 
+function toMediaUrl(value: any): string {
+  if (!value) return "";
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) return toMediaUrl(value[0]);
+  if (typeof value === "object") {
+    if (value.url_list) return toMediaUrl(value.url_list);
+    if (value.url) return toMediaUrl(value.url);
+    if (value.download_url) return toMediaUrl(value.download_url);
+    if (value.play_url) return toMediaUrl(value.play_url);
+  }
+  return "";
+}
+
+function secureMediaUrl(value: any): string {
+  const url = toMediaUrl(value);
+  return url ? url.replace(/^http:\/\//i, "https://") : "";
+}
+
 function streamUrl(url: string, type: "audio" | "video") {
   return `/api/public/media-stream?type=${type}&url=${encodeURIComponent(url)}`;
 }
@@ -164,20 +182,23 @@ async function parseDomestic(url: string, endpoint: string, token: string) {
   const images = Array.isArray(rawImages)
     ? rawImages
         .map((item: any) => {
-          if (typeof item === "string") return item;
-          if (Array.isArray(item?.url_list)) return item.url_list[0] || "";
-          return item?.url || item?.download_url || "";
+          return toMediaUrl(item);
         })
         .filter(Boolean)
-        .map((item: string) => item.replace(/^http:\/\//i, "https://"))
+        .map((item: string) => secureMediaUrl(item))
     : [];
-  const music = d.music_url || d.audio_url || d.video_url;
-  if (!music && !images.length) throw new Error("无有效媒体链接");
+  const videoUrl = secureMediaUrl(
+    d.video_url || d.videoUrl || d.video || d.play_url || d.play || d.url,
+  );
+  const musicUrl = secureMediaUrl(
+    d.music_url || d.musicUrl || d.music || d.audio_url || d.audio,
+  );
+  if (!videoUrl && !musicUrl && !images.length) throw new Error("无有效媒体链接");
   return {
     title: d.title || "提取的文件",
-    cover: d.cover || images[0] || "",
-    music_url: music || "",
-    video_url: d.video_url || "",
+    cover: secureMediaUrl(d.cover || d.cover_url || d.thumbnail || d.poster || d.pic) || images[0] || "",
+    music_url: musicUrl || videoUrl,
+    video_url: videoUrl,
     images,
     original_url: url,
     platform: determinePlatform(url),
