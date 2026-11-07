@@ -129,7 +129,7 @@
         }
 
         /* 移动端采用附件中「视频保存助手」模板；桌面端完全不进入这些规则 */
-        .mobile-template, .mobile-bottom-nav, .mobile-paste-btn { display: none; }
+        .mobile-template, .mobile-bottom-nav, .mobile-paste-btn, .mobile-sheet-mask, .mobile-sheet { display: none; }
         @media (max-width: 640px) {
             html { background: #0e1220; }
             body {
@@ -329,12 +329,138 @@
             .mobile-bottom-nav button i { font-size: 17px; }
             .mobile-bottom-nav button:first-child { color: #5b8cff; }
             #auth-bar {
-                justify-content: center !important;
-                padding: 4px;
-                border-radius: 0 0 12px 12px;
-                background: rgba(14,18,32,.95);
-                backdrop-filter: blur(12px);
+                display: none !important;
             }
+            .mobile-sheet-mask {
+                position: fixed;
+                z-index: 10020;
+                inset: 0;
+                background: rgba(3,7,18,.72);
+                backdrop-filter: blur(4px);
+            }
+            .mobile-sheet-mask.is-open { display: block; }
+            .mobile-sheet {
+                position: fixed;
+                z-index: 10021;
+                right: 0;
+                bottom: 0;
+                left: 0;
+                max-height: 86vh;
+                padding: 18px 16px calc(22px + env(safe-area-inset-bottom));
+                overflow-y: auto;
+                border: 1px solid rgba(255,255,255,.08);
+                border-bottom: 0;
+                border-radius: 22px 22px 0 0;
+                background: #111827;
+                box-shadow: 0 -24px 60px rgba(0,0,0,.42);
+                transform: translateY(102%);
+                transition: transform .25s ease;
+            }
+            .mobile-sheet.is-open { display: block; transform: translateY(0); }
+            .mobile-sheet-head {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 16px;
+            }
+            .mobile-sheet-head h2 { color: #fff; font-size: 19px; font-weight: 700; }
+            .mobile-sheet-close {
+                width: 34px;
+                height: 34px;
+                border: 0;
+                border-radius: 50%;
+                background: #1f2937;
+                color: #94a3b8;
+                font-size: 18px;
+            }
+            .mobile-guide-hero {
+                margin-bottom: 13px;
+                padding: 18px;
+                border-radius: 16px;
+                background: linear-gradient(145deg, #2a3c6e, #16223f);
+            }
+            .mobile-guide-hero strong { display: block; color: #fff; font-size: 17px; }
+            .mobile-guide-hero span { display: block; margin-top: 6px; color: #c0cbe0; font-size: 11px; }
+            .mobile-guide-card, .mobile-mine-card {
+                margin-top: 10px;
+                padding: 15px;
+                border: 1px solid rgba(255,255,255,.07);
+                border-radius: 15px;
+                background: #171e30;
+            }
+            .mobile-guide-title { color: #e8ecf6; font-size: 14px; font-weight: 700; }
+            .mobile-guide-step {
+                display: grid;
+                grid-template-columns: 28px 1fr;
+                gap: 10px;
+                padding: 13px 0;
+                border-bottom: 1px solid rgba(255,255,255,.06);
+            }
+            .mobile-guide-step:last-child { border-bottom: 0; padding-bottom: 0; }
+            .mobile-guide-no {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 28px;
+                height: 28px;
+                border-radius: 9px;
+                background: rgba(77,130,255,.16);
+                color: #6f9bff;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            .mobile-guide-step strong { display: block; color: #d9e0ef; font-size: 13px; }
+            .mobile-guide-step p { margin-top: 4px; color: #8a96af; font-size: 11px; line-height: 1.65; }
+            .mobile-faq details { padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+            .mobile-faq details:last-child { border-bottom: 0; }
+            .mobile-faq summary { color: #d9e0ef; font-size: 12px; cursor: pointer; }
+            .mobile-faq p { padding-top: 8px; color: #8a96af; font-size: 11px; line-height: 1.65; }
+            .mobile-mine-profile {
+                display: flex;
+                align-items: center;
+                padding: 18px;
+                border-radius: 17px;
+                background: linear-gradient(145deg, #2a3c6e, #16223f);
+            }
+            .mobile-mine-avatar {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 58px;
+                height: 58px;
+                flex: 0 0 auto;
+                border: 2px solid rgba(255,255,255,.45);
+                border-radius: 50%;
+                background: rgba(255,255,255,.14);
+                color: #fff;
+                font-size: 22px;
+                font-weight: 700;
+            }
+            .mobile-mine-profile-text { min-width: 0; margin-left: 13px; }
+            .mobile-mine-profile-text strong { display: block; overflow: hidden; color: #fff; font-size: 15px; text-overflow: ellipsis; }
+            .mobile-mine-profile-text span { display: block; margin-top: 5px; color: #c0cbe0; font-size: 10px; }
+            .mobile-mine-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; margin-top: 11px; overflow: hidden; border-radius: 14px; background: #273149; }
+            .mobile-mine-stat { padding: 13px 6px; background: #171e30; text-align: center; }
+            .mobile-mine-stat strong { display: block; color: #d9e0ef; font-size: 16px; }
+            .mobile-mine-stat span { display: block; margin-top: 3px; color: #8a96af; font-size: 10px; }
+            .mobile-account-action {
+                display: flex;
+                align-items: center;
+                width: 100%;
+                min-height: 46px;
+                margin-top: 9px;
+                padding: 0 14px;
+                border: 1px solid rgba(255,255,255,.07);
+                border-radius: 12px;
+                background: #1f2842;
+                color: #d9e0ef;
+                font-size: 12px;
+                text-decoration: none;
+            }
+            .mobile-account-action i { width: 24px; color: #6f9bff; }
+            .mobile-account-action.primary { justify-content: center; border: 0; background: linear-gradient(135deg,#4a86ff,#2f6bff); color: #fff; font-weight: 700; }
+            .mobile-account-action.danger i { color: #ff7b7b; }
+            .mobile-notice { margin-top: 12px; color: #68758f; font-size: 10px; line-height: 1.6; text-align: center; }
         }
     </style>
 </head>
@@ -543,7 +669,7 @@
             </div>
 
         <div class="mobile-template mobile-quick-grid">
-            <button class="mobile-quick-card green" onclick="document.getElementById('platforms-section')?.scrollIntoView({behavior:'smooth'})"><strong>使用教程</strong><small>查看解析与保存方法</small><i class="fa-solid fa-book-open"></i></button>
+            <button class="mobile-quick-card green" onclick="openMobileSheet('mobile-guide-sheet')"><strong>使用教程</strong><small>查看解析与保存方法</small><i class="fa-solid fa-book-open"></i></button>
             <button class="mobile-quick-card cyan" onclick="document.getElementById('tab-link-btn').click();document.getElementById('url-input').focus()"><strong>短视频解析</strong><small>粘贴链接立即处理</small><i class="fa-solid fa-video"></i></button>
             <button class="mobile-quick-card purple" onclick="document.getElementById('tab-batch-btn').click()"><strong>批量解析</strong><small>多条链接一起处理</small><i class="fa-solid fa-layer-group"></i></button>
             <button class="mobile-quick-card pink" onclick="document.getElementById('tab-local-btn').click()"><strong>本地转换</strong><small>本地视频提取音频</small><i class="fa-solid fa-file-audio"></i></button>
@@ -786,8 +912,56 @@
     <nav class="mobile-bottom-nav" aria-label="移动端快捷导航">
         <button type="button" onclick="window.scrollTo({top:0,behavior:'smooth'})"><i class="fa-solid fa-house"></i><span>首页</span></button>
         <button type="button" onclick="document.getElementById('tab-batch-btn').click();window.scrollTo({top:160,behavior:'smooth'})"><i class="fa-solid fa-layer-group"></i><span>批量</span></button>
-        <button type="button" onclick="document.getElementById('auth-bar').scrollIntoView({behavior:'smooth'})"><i class="fa-solid fa-user"></i><span>我的</span></button>
+        <button type="button" onclick="openMobileSheet('mobile-mine-sheet')"><i class="fa-solid fa-user"></i><span>我的</span></button>
     </nav>
+
+    <div id="mobile-sheet-mask" class="mobile-sheet-mask" onclick="closeMobileSheets()"></div>
+    <section id="mobile-guide-sheet" class="mobile-sheet" aria-label="使用教程">
+        <div class="mobile-sheet-head"><h2>使用教程</h2><button class="mobile-sheet-close" onclick="closeMobileSheets()" aria-label="关闭">×</button></div>
+        <div class="mobile-guide-hero"><strong>三步完成素材保存</strong><span>复制链接、粘贴解析、选择需要的格式下载</span></div>
+        <div class="mobile-guide-card">
+            <div class="mobile-guide-title">操作步骤</div>
+            <div class="mobile-guide-step"><span class="mobile-guide-no">01</span><div><strong>复制作品链接</strong><p>在抖音、快手、小红书、B站等 App 中点“分享”，选择复制链接或复制完整分享文案。</p></div></div>
+            <div class="mobile-guide-step"><span class="mobile-guide-no">02</span><div><strong>粘贴并开始解析</strong><p>回到本站首页，点“粘贴”后开始解析；网站会自动从分享文案里识别真实链接。</p></div></div>
+            <div class="mobile-guide-step"><span class="mobile-guide-no">03</span><div><strong>保存所需素材</strong><p>解析成功后可下载无水印视频、提取 MP3、复制直链或在线观看。大文件建议复制直链到浏览器下载。</p></div></div>
+        </div>
+        <div class="mobile-guide-card mobile-faq">
+            <div class="mobile-guide-title">常见问题</div>
+            <details open><summary>为什么提示解析失败？</summary><p>常见原因是原链接失效、作品受限或平台规则临时变化，请确认链接可访问后稍后重试。</p></details>
+            <details><summary>支持哪些平台？</summary><p>支持抖音、快手、小红书、B站、微博及页面列出的其他国内外主流平台。</p></details>
+            <details><summary>为什么下载没有反应？</summary><p>请允许浏览器下载文件；部分平台存在防盗链，可先复制直链，再用系统浏览器打开保存。</p></details>
+            <details><summary>可以批量解析吗？</summary><p>可以，首页选择“批量解析”，粘贴多条链接后统一处理。</p></details>
+        </div>
+        <p class="mobile-notice">仅用于保存你拥有版权或已获得授权的内容，请勿用于未经授权的传播。</p>
+    </section>
+
+    <section id="mobile-mine-sheet" class="mobile-sheet" aria-label="我的">
+        <div class="mobile-sheet-head"><h2>我的</h2><button class="mobile-sheet-close" onclick="closeMobileSheets()" aria-label="关闭">×</button></div>
+        <div id="mobile-mine-content"><div class="mobile-mine-card">正在读取账户信息…</div></div>
+    </section>
+
+    <script>
+      function openMobileSheet(id) {
+        if (window.innerWidth > 640) return;
+        closeMobileSheets();
+        document.getElementById('mobile-sheet-mask')?.classList.add('is-open');
+        document.getElementById(id)?.classList.add('is-open');
+        document.body.style.overflow = 'hidden';
+      }
+      function closeMobileSheets() {
+        document.querySelectorAll('.mobile-sheet.is-open').forEach(el => el.classList.remove('is-open'));
+        document.getElementById('mobile-sheet-mask')?.classList.remove('is-open');
+        document.body.style.overflow = '';
+      }
+      window.addEventListener('DOMContentLoaded', () => {
+        const sp = new URLSearchParams(location.search);
+        if (sp.get('panel') === 'mine' && window.innerWidth <= 640) {
+          openMobileSheet('mobile-mine-sheet');
+          sp.delete('panel');
+          history.replaceState({}, '', location.pathname + (sp.toString() ? '?' + sp : '') + location.hash);
+        }
+      });
+    </script>
 
     <!-- Video Player Modal -->
     <div id="video-modal" class="fixed inset-0 z-[100] hidden items-center justify-center bg-black/80 backdrop-blur-sm opacity-0 transition-opacity duration-300">
@@ -1581,6 +1755,47 @@
       const btnStyle = "padding:6px 14px;border-radius:8px;font-size:13px;font-weight:600;border:1px solid #475569;background:rgba(15,23,42,0.7);color:#f8fafc;cursor:pointer;backdrop-filter:blur(8px);";
       const primaryStyle = btnStyle + "background:linear-gradient(to right,#db2777,#9333ea);border-color:transparent;";
 
+      function renderMobileMine() {
+        const box = document.getElementById("mobile-mine-content");
+        if (!box) return;
+        if (!currentUser) {
+          box.innerHTML = `
+            <div class="mobile-mine-profile">
+              <div class="mobile-mine-avatar">游</div>
+              <div class="mobile-mine-profile-text"><strong>游客用户</strong><span>登录后查看次数、充值和账户信息</span></div>
+            </div>
+            <div class="mobile-mine-stats">
+              <div class="mobile-mine-stat"><strong>—</strong><span>剩余次数</span></div>
+              <div class="mobile-mine-stat"><strong>已就绪</strong><span>解析服务</span></div>
+            </div>
+            <a class="mobile-account-action primary" href="/auth?redirect=${encodeURIComponent(location.pathname + '?panel=mine')}">登录 / 注册</a>
+            <button id="mobile-mine-guide" class="mobile-account-action"><i class="fa-solid fa-book-open"></i>使用教程</button>
+            <p class="mobile-notice">账户仅用于同步解析次数与订单，不会读取你的社交账号信息。</p>`;
+          document.getElementById("mobile-mine-guide")?.addEventListener("click", () => openMobileSheet("mobile-guide-sheet"));
+          return;
+        }
+        const safeEmail = String(currentUser.email || "已登录用户").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        box.innerHTML = `
+          <div class="mobile-mine-profile">
+            <div class="mobile-mine-avatar">${safeEmail.slice(0, 1).toUpperCase()}</div>
+            <div class="mobile-mine-profile-text"><strong>${safeEmail}</strong><span>${isAdmin ? '管理员账户 · 解析次数不限' : '账户已登录 · 数据已同步'}</span></div>
+          </div>
+          <div class="mobile-mine-stats">
+            <div class="mobile-mine-stat"><strong>${isAdmin ? '不限' : (userCredits ?? '—')}</strong><span>剩余次数</span></div>
+            <div class="mobile-mine-stat"><strong>已就绪</strong><span>解析服务</span></div>
+          </div>
+          <div class="mobile-mine-card">
+            ${!isAdmin ? '<button id="mobile-mine-recharge" class="mobile-account-action"><i class="fa-solid fa-bolt"></i>充值解析次数</button>' : ''}
+            ${isAdmin ? '<a class="mobile-account-action" href="/admin"><i class="fa-solid fa-gear"></i>管理后台</a>' : ''}
+            <button id="mobile-mine-guide" class="mobile-account-action"><i class="fa-solid fa-book-open"></i>使用教程</button>
+            <button id="mobile-mine-logout" class="mobile-account-action danger"><i class="fa-solid fa-right-from-bracket"></i>退出登录</button>
+          </div>
+          <p class="mobile-notice">解析次数与网站账户保持一致。</p>`;
+        document.getElementById("mobile-mine-recharge")?.addEventListener("click", () => { closeMobileSheets(); window.__openRecharge && window.__openRecharge(); });
+        document.getElementById("mobile-mine-guide")?.addEventListener("click", () => openMobileSheet("mobile-guide-sheet"));
+        document.getElementById("mobile-mine-logout")?.addEventListener("click", async () => { await sb.auth.signOut(); closeMobileSheets(); location.reload(); });
+      }
+
       function renderBar() {
         bar.innerHTML = "";
         if (!currentUser) {
@@ -1589,6 +1804,7 @@
           a.href = "/auth?redirect=" + encodeURIComponent(location.pathname);
           a.style.cssText = primaryStyle + "text-decoration:none;display:inline-block;";
           bar.appendChild(a);
+          renderMobileMine();
           return;
         }
         const tag = document.createElement("span");
@@ -1622,6 +1838,7 @@
         out.style.cssText = btnStyle;
         out.onclick = async () => { await sb.auth.signOut(); location.reload(); };
         bar.appendChild(out);
+        renderMobileMine();
       }
 
       let _refreshInflight = null;
