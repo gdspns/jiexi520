@@ -652,7 +652,7 @@
                     <div class="flex flex-col sm:flex-row gap-6 items-start sm:items-center bg-slate-900/50 rounded-2xl p-4 border border-slate-700/50">
                         <div class="result-media-wrap w-full sm:w-36 h-36 bg-slate-800 rounded-xl overflow-hidden relative flex-shrink-0 group ring-1 ring-white/10">
                             <img id="video-thumbnail" src="" alt="封面" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110">
-                            <video id="mobile-result-video" class="hidden" playsinline webkit-playsinline preload="metadata"></video>
+                            <video id="mobile-result-video" class="hidden" playsinline webkit-playsinline preload="metadata" referrerpolicy="no-referrer"></video>
                             <div id="mobile-video-state" class="mobile-video-state hidden">
                                 <div id="mobile-video-spinner" class="mobile-video-spinner"></div>
                                 <span id="mobile-video-status">视频加载中…</span>
@@ -1179,9 +1179,19 @@
         }
 
         // 带下载进度追踪的 fetch
-        async function fetchWithProgress(url, onProgress) {
+        async function fetchWithProgress(url, onProgress, preferDirect = false) {
             const proxied = proxify(url);
-            const response = await fetch(proxied);
+            let response;
+            if (preferDirect && /^https?:\/\//i.test(url)) {
+                try {
+                    response = await fetch(url, { referrerPolicy: 'no-referrer' });
+                    if (!response.ok) throw new Error('直连返回 ' + response.status);
+                } catch {
+                    response = await fetch(proxied);
+                }
+            } else {
+                response = await fetch(proxied);
+            }
             if (!response.ok) throw new Error('媒体代理返回 ' + response.status);
             if (!response.body || !onProgress) return response;
 
@@ -1304,7 +1314,7 @@
                     } else {
                         status.textContent = `已读取 ${(received / 1048576).toFixed(1)} MB`;
                     }
-                });
+                }, true);
                 if (cancelled) return;
                 const blob = await response.blob();
                 const safeName = String(fileName || 'video.mp4').replace(/[\\/:*?"<>|]/g, '').slice(0, 100) || 'video.mp4';
@@ -1659,7 +1669,7 @@
                         videoStatus.textContent = '视频加载失败，请稍后重试';
                         return;
                     }
-                    const fallback = data.video_url;
+                    const fallback = proxifyVideo(data.video_url);
                     mobileVideo.dataset.fallbackUsed = '1';
                     videoStatus.textContent = '正在切换播放线路…';
                     mobileVideo.src = fallback;
@@ -1677,7 +1687,7 @@
                         videoReady.style.display = 'flex';
                     }
                 };
-                mobileVideo.src = proxifyVideo(data.video_url);
+                mobileVideo.src = data.video_url;
                 mobileVideo.classList.add('is-ready-source');
                 mobileVideo.style.display = 'block';
                 mobileVideo.load();
