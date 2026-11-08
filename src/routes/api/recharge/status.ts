@@ -32,7 +32,7 @@ export const Route = createFileRoute("/api/recharge/status")({
 
         const { data: order, error } = await supabaseAdmin
           .from("payment_orders")
-          .select("order_no,status,credits,amount,channel,expires_at,paid_at,product_name,qr_url,wap_url")
+          .select("order_no,status,credits,amount,channel,provider,expires_at,paid_at,product_name,qr_url,wap_url")
           .eq("order_no", orderNo)
           .eq("user_id", userRes.user.id)
           .maybeSingle();

@@ -143,6 +143,7 @@ export const Route = createFileRoute("/api/recharge/create")({
             credits: product.credits,
             product_name: product.name,
             channel,
+            provider,
           });
         } catch (e: any) {
           return json({ error: e?.message || "服务器错误" }, 500);
