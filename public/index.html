@@ -695,6 +695,17 @@
                         <div class="mobile-gallery-head"><strong id="mobile-gallery-count">图集</strong><button id="mobile-gallery-save-all" class="mobile-gallery-save-all" type="button">一键批量保存</button></div>
                         <div id="mobile-gallery-grid" class="mobile-gallery-grid"></div>
                     </div>
+                    <!-- 桌面端图集：图文笔记解析后一直没地方显示图片，这里补上 -->
+                    <div id="desktop-gallery-panel" class="mt-6 hidden rounded-2xl border border-slate-700/60 bg-slate-900/50 p-4">
+                        <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                            <strong class="text-sm font-semibold text-slate-200"><i class="fa-solid fa-images mr-1 text-primary-400"></i><span id="desktop-gallery-count">图集</span></strong>
+                            <div class="flex items-center gap-2">
+                                <button id="desktop-gallery-copy" type="button" class="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-700">复制图片链接</button>
+                                <button id="desktop-gallery-save-all" type="button" class="rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 px-3 py-1.5 text-xs font-bold text-white transition-all hover:from-blue-400 hover:to-indigo-500"><i class="fa-solid fa-download mr-1"></i>下载全部图片</button>
+                            </div>
+                        </div>
+                        <div id="desktop-gallery-grid" class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"></div>
+                    </div>
                     <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                         <button id="download-btn" class="bg-white hover:bg-slate-200 text-slate-900 font-bold py-3 px-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 group">
                             <i class="fa-solid fa-download group-hover:-translate-y-1 transition-transform"></i> 下载真MP3音频
@@ -1350,6 +1361,21 @@
             if (u.startsWith('/api/public/media-stream')) return u;
             if (u.startsWith('/api/public/media-proxy')) return u;
             return '/api/public/media-proxy?url=' + encodeURIComponent(u);
+        }
+
+        // 图片 CDN 同样有防盗链，直接用原始地址经常是 403 空白图，必须走同源代理
+        function proxifyImage(u) {
+            if (!u) return u;
+            if (u.startsWith('/api/public/media-proxy')) {
+                if (/[?&]type=/.test(u)) return u;
+                return u + (u.includes('?') ? '&' : '?') + 'type=image';
+            }
+            return '/api/public/media-proxy?type=image&url=' + encodeURIComponent(u);
+        }
+
+        function imageDownloadUrl(u, name) {
+            return '/api/public/media-proxy?type=image&download=1&url=' + encodeURIComponent(u)
+                + '&filename=' + encodeURIComponent(name || 'image.jpg');
         }
 
         function proxifyVideo(u) {
@@ -2271,7 +2297,13 @@
             try {
                 const files = [];
                 for (const item of selected) {
-                    const response = await fetch(item.url, { referrerPolicy: 'no-referrer' });
+                    let response = null;
+                    try {
+                        response = await fetch(proxifyImage(item.url), { referrerPolicy: 'no-referrer' });
+                    } catch (e) {}
+                    if (!response || !response.ok) {
+                        response = await fetch(item.url, { referrerPolicy: 'no-referrer' });
+                    }
                     if (!response.ok) throw new Error('图片下载失败');
                     const blob = await response.blob();
                     const ext = blob.type.includes('png') ? 'png' : blob.type.includes('webp') ? 'webp' : 'jpg';
@@ -2313,10 +2345,16 @@
                 const item = document.createElement('div');
                 item.className = 'mobile-gallery-item';
                 const image = document.createElement('img');
-                image.src = url;
+                image.src = proxifyImage(url);
                 image.referrerPolicy = 'no-referrer';
                 image.alt = `图片 ${index + 1}`;
-                image.addEventListener('click', () => window.open(url, '_blank', 'noopener'));
+                // 代理也拿不到时退回直连试一次
+                image.addEventListener('error', () => {
+                    if (image.dataset.direct === '1') return;
+                    image.dataset.direct = '1';
+                    image.src = url;
+                });
+                image.addEventListener('click', () => window.open(proxifyImage(url), '_blank', 'noopener'));
                 const save = document.createElement('button');
                 save.type = 'button';
                 save.textContent = `保存第 ${index + 1} 张`;
@@ -2325,6 +2363,103 @@
                 grid.appendChild(item);
             });
             document.getElementById('mobile-gallery-save-all').onclick = () => saveMobileImages(images);
+            panel.classList.remove('hidden');
+        }
+
+        // ================= 桌面端图集 =================
+        let currentGalleryImages = [];
+
+        function imageFileName(title, index, url) {
+            const clean = String(title || 'image').replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 40) || 'image';
+            const m = String(url).split('?')[0].match(/\.(jpe?g|png|webp|gif|avif|bmp)$/i);
+            return `${clean}-${index + 1}.${m ? m[1].toLowerCase() : 'jpg'}`;
+        }
+
+        function downloadAllImages(images) {
+            const title = (currentSingleData && currentSingleData.title) || 'image';
+            images.forEach((url, index) => {
+                setTimeout(() => {
+                    const name = imageFileName(title, index, url);
+                    const link = document.createElement('a');
+                    link.href = imageDownloadUrl(url, name);
+                    link.download = name;
+                    link.rel = 'noopener';
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                }, index * 350);
+            });
+            showToast(`正在下载 ${images.length} 张图片，若浏览器拦截请允许「多文件下载」`, 'info');
+        }
+
+        function renderDesktopGallery(images) {
+            const panel = document.getElementById('desktop-gallery-panel');
+            const grid = document.getElementById('desktop-gallery-grid');
+            const count = document.getElementById('desktop-gallery-count');
+            if (!panel || !grid) return;
+            currentGalleryImages = Array.isArray(images) ? images.slice() : [];
+            grid.innerHTML = '';
+            if (isMobileLayout() || !currentGalleryImages.length) {
+                panel.classList.add('hidden');
+                return;
+            }
+            const title = (currentSingleData && currentSingleData.title) || 'image';
+            count.textContent = `图集 · 共 ${currentGalleryImages.length} 张`;
+            currentGalleryImages.forEach((url, index) => {
+                const name = imageFileName(title, index, url);
+                const item = document.createElement('div');
+                item.className = 'group relative overflow-hidden rounded-xl border border-slate-700/60 bg-slate-800';
+                const img = document.createElement('img');
+                img.className = 'block aspect-square w-full cursor-zoom-in object-cover transition-transform duration-300 group-hover:scale-105';
+                img.loading = 'lazy';
+                img.decoding = 'async';
+                img.referrerPolicy = 'no-referrer';
+                img.alt = `图片 ${index + 1}`;
+                img.src = proxifyImage(url);
+                img.addEventListener('error', () => {
+                    if (img.dataset.direct !== '1') {
+                        img.dataset.direct = '1';
+                        img.src = url;
+                        return;
+                    }
+                    img.remove();
+                    const tip = document.createElement('button');
+                    tip.type = 'button';
+                    tip.className = 'flex aspect-square w-full flex-col items-center justify-center gap-1 text-[11px] text-slate-400';
+                    tip.innerHTML = '<i class="fa-solid fa-image-slash text-lg"></i>图片加载失败，点此重试';
+                    tip.addEventListener('click', () => {
+                        tip.remove();
+                        item.insertBefore(img, bar);
+                        img.dataset.direct = '';
+                        img.src = proxifyImage(url);
+                    });
+                    item.insertBefore(tip, bar);
+                });
+                img.addEventListener('click', () => window.open(proxifyImage(url), '_blank', 'noopener'));
+
+                const bar = document.createElement('div');
+                bar.className = 'absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/85 to-transparent px-2 pb-2 pt-6 opacity-0 transition-opacity group-hover:opacity-100';
+                const idx = document.createElement('span');
+                idx.className = 'text-[11px] font-medium text-white/80';
+                idx.textContent = `${index + 1} / ${currentGalleryImages.length}`;
+                const dl = document.createElement('a');
+                dl.className = 'rounded-lg bg-white/90 px-2 py-1 text-[11px] font-bold text-slate-900 transition-colors hover:bg-white';
+                dl.textContent = '下载';
+                dl.href = imageDownloadUrl(url, name);
+                dl.setAttribute('download', name);
+                dl.rel = 'noopener';
+                dl.addEventListener('click', (event) => event.stopPropagation());
+                bar.append(idx, dl);
+                item.append(img, bar);
+                grid.appendChild(item);
+            });
+            const saveAll = document.getElementById('desktop-gallery-save-all');
+            if (saveAll) saveAll.onclick = () => downloadAllImages(currentGalleryImages);
+            const copyAll = document.getElementById('desktop-gallery-copy');
+            if (copyAll) copyAll.onclick = () => {
+                if (!currentGalleryImages.length) return;
+                copyToClipboard(currentGalleryImages.join('\n'), `已复制 ${currentGalleryImages.length} 张图片直链`);
+            };
             panel.classList.remove('hidden');
         }
 
@@ -2626,6 +2761,7 @@
             document.getElementById('play-pause-btn').querySelector('i').className = 'fa-solid fa-play ml-1';
             document.getElementById('audio-progress').style.width = '0%';
             renderMobileGallery(data.images || []);
+            renderDesktopGallery(data.images || []);
             
             document.getElementById('result-container').classList.remove('hidden');
             document.getElementById('result-container').classList.add('animate-fade-in-up');

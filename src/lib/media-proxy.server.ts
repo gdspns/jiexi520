@@ -92,15 +92,19 @@ export function toMp4Name(name: string | null | undefined, fallback = "video.mp4
   return /\.(mp4|m4v|mov)$/i.test(safe) ? safe : safe + ".mp4";
 }
 
+const IMAGE_EXT = /\.(jpe?g|png|webp|gif|avif|bmp)$/i;
+
 function attachmentName(name: string | null, fallback: string) {
-  const cleaned =
-    toMp4Name(name, fallback).replace(/[\\/"\r\n]/g, "").trim().slice(0, 120) || fallback;
+  // 图片下载要保留原扩展名，不能被强制改成 .mp4
+  const raw = String(name || "").replace(/[\\/"\r\n]/g, "").trim().slice(0, 120);
+  const cleaned = raw && IMAGE_EXT.test(raw) ? raw : raw ? toMp4Name(raw, fallback) : fallback;
   let ascii = cleaned.replace(/[^\x20-\x7E]/g, "_");
-  // 纯中文标题转 ASCII 会变成一整串下划线（____.mp4），
+  // 纯中文标题转 ASCII 会变成一整串下划线（____.mp4 / __-1.jpg），
   // 有些国内浏览器会忽略 filename*、只认这个 ASCII 名，存下来就是一堆下划线。
-  // 这种情况换成一个可读的 video-xxxx.mp4。
-  if (!/[A-Za-z0-9]/.test(ascii.replace(/\.[a-z0-9]+$/i, ""))) {
-    ascii = `video-${Date.now().toString(36)}.mp4`;
+  // 剩下只有数字/下划线/短横线时也算"没有可读名"，换成 file-xxxx.jpg。
+  if (!/[A-Za-z]/.test(ascii.replace(/\.[a-z0-9]+$/i, "").replace(/[\s_\-.\d]/g, ""))) {
+    const ext = (cleaned.match(/\.([A-Za-z0-9]+)$/) || [, "mp4"])[1].toLowerCase();
+    ascii = `file-${Date.now().toString(36)}.${ext}`;
   }
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(cleaned)}`;
 }
@@ -238,8 +242,17 @@ export async function proxyMedia(request: Request, opts: ProxyOptions = {}): Pro
     respHeaders.set("content-type", "application/octet-stream");
   }
   const currentType = respHeaders.get("content-type") || "";
+  const isImage = requestedType === "image";
   if (requestedType === "video" && !currentType.toLowerCase().startsWith("video/")) {
     respHeaders.set("content-type", "video/mp4");
+  }
+  // 图片走 <img>，content-type 必须是真的图片类型，否则浏览器拒绝解码
+  if (isImage && (!currentType || currentType === "application/octet-stream")) {
+    const ext = (parsed.pathname.split(".").pop() || "").toLowerCase();
+    respHeaders.set(
+      "content-type",
+      ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : ext === "gif" ? "image/gif" : "image/jpeg",
+    );
   }
 
   // 上游忽略 Range、回了整包 200：我们自己切出请求的那一段回 206。
@@ -259,7 +272,8 @@ export async function proxyMedia(request: Request, opts: ProxyOptions = {}): Pro
     // 允许浏览器缓存已下载的分片：手机上每次 seek 都重新下一遍，
     // 移动网络根本追不上，表现就是「拖着拖着就卡死」。
     sliced.set("Cache-Control", "public, max-age=600");
-    if (shouldDownload) sliced.set("Content-Disposition", attachmentName(filename, "video.mp4"));
+    if (shouldDownload)
+      sliced.set("Content-Disposition", attachmentName(filename, isImage ? "image.jpg" : "video.mp4"));
     return new Response(sliceStream(upstream.body, start, end), {
       status: 206,
       statusText: "Partial Content",
@@ -273,11 +287,11 @@ export async function proxyMedia(request: Request, opts: ProxyOptions = {}): Pro
     respHeaders.set("accept-ranges", "bytes");
   }
   if (shouldDownload) {
-    respHeaders.set("Content-Disposition", attachmentName(filename, "video.mp4"));
+    respHeaders.set("Content-Disposition", attachmentName(filename, isImage ? "image.jpg" : "video.mp4"));
     respHeaders.set("Cache-Control", "no-store");
     // 下载链接本身就是个 .mp4，国内浏览器（UC/QQ/百度）主要靠
     // 类型 + 后缀判断"这是视频文件"，不是网页，才肯交给下载器。
-    if (!respHeaders.get("content-type")?.toLowerCase().startsWith("video/")) {
+    if (!isImage && !respHeaders.get("content-type")?.toLowerCase().startsWith("video/")) {
       respHeaders.set("content-type", "video/mp4");
     }
   } else {
