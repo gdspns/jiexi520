@@ -664,13 +664,20 @@
                         </div>
                         <div class="flex-grow w-full">
                             <h3 id="video-title" class="font-semibold text-slate-100 text-lg leading-snug line-clamp-2 mb-2">标题</h3>
-                            <div class="flex flex-wrap items-center gap-2 mb-5">
+                            <div class="flex flex-wrap items-center gap-2">
                                 <span class="px-2.5 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs font-medium text-slate-300"><i class="fa-solid fa-tag"></i> <span id="platform-name">平台</span></span>
                                 <span class="px-2.5 py-1 bg-green-500/10 border border-green-500/20 text-green-400 rounded-lg text-xs font-medium"><i class="fa-solid fa-check-circle"></i> 提取成功</span>
                             </div>
-                            
-                            <!-- Single Audio Player -->
-                            <div id="single-audio-box" class="flex items-center gap-4 bg-slate-800 p-3 rounded-xl border border-slate-700 shadow-inner">
+                        </div>
+                    </div>
+
+                    <!-- 解析成功后内嵌视频预览：信息卡下方直接显示视频，点击即可播放观看 -->
+                    <div id="desktop-inline-video-box" class="mt-6 hidden rounded-2xl overflow-hidden border border-slate-700/60 bg-black relative">
+                        <video id="desktop-inline-video" class="w-full bg-black" style="max-height:68vh;object-fit:contain;display:block" controls playsinline preload="metadata" referrerpolicy="no-referrer"></video>
+                    </div>
+
+                    <!-- Single Audio Player（音频在视频下方） -->
+                    <div id="single-audio-box" class="mt-6 flex items-center gap-4 bg-slate-800 p-3 rounded-xl border border-slate-700 shadow-inner">
                                 <button id="play-pause-btn" class="w-12 h-12 rounded-full bg-primary-500 hover:bg-primary-600 text-white flex items-center justify-center transition-all shadow-[0_0_10px_rgba(236,72,153,0.3)] flex-shrink-0 focus:outline-none">
                                     <i class="fa-solid fa-play ml-1"></i>
                                 </button>
@@ -686,8 +693,6 @@
                                     </div>
                                 </div>
                                 <audio id="real-audio-player" preload="metadata"></audio>
-                            </div>
-                        </div>
                     </div>
 
                     <!-- Single Actions -->
@@ -1387,6 +1392,60 @@
             }
             return '/api/public/media-proxy?type=video&url=' + encodeURIComponent(u);
         }
+
+        // ================= 桌面端内嵌视频预览 =================
+        // 解析成功后信息卡下方直接显示视频，点击即可播放，不再必须打开「在线观看」弹窗。
+        // 线路策略与手机端一致：直连 CDN → 同源代理 → 转码兜底，失败自动降级。
+        const DesktopInlineVideo = (() => {
+            let video = null, box = null, sources = [], index = 0;
+
+            function els() {
+                video = (video && video.isConnected) ? video : document.getElementById('desktop-inline-video');
+                box = (box && box.isConnected) ? box : document.getElementById('desktop-inline-video-box');
+                return !!video && !!box;
+            }
+
+            function stop() {
+                if (!els()) return;
+                try { video.pause(); } catch (e) {}
+                video.removeAttribute('src');
+                try { video.load(); } catch (e) {}
+                video.onerror = null;
+                box.classList.add('hidden');
+                sources = []; index = 0;
+            }
+
+            function load() {
+                const src = sources[index];
+                if (!src) { box.classList.add('hidden'); return; }
+                video.src = src;
+                video.load();
+            }
+
+            function onError() {
+                index += 1;
+                if (index < sources.length) { load(); return; }
+                // 全部线路失败：收起播放器，不影响保存 / 在线观看等按钮
+                box.classList.add('hidden');
+            }
+
+            function mount(data) {
+                if (!els()) return;
+                stop();
+                const u = data && data.video_url;
+                if (!u || isMobileLayout()) return; // 手机端走 MobilePlayback
+                sources = [];
+                if (/^https?:\/\//i.test(u)) sources.push(u);   // 直连最快，失败再降级
+                sources.push(proxifyVideo(u));
+                sources.push('/api/public/video-compat?url=' + encodeURIComponent(u));
+                index = 0;
+                video.onerror = onError;
+                box.classList.remove('hidden');
+                load();
+            }
+
+            return { mount, stop, pause: () => { if (els()) { try { video.pause(); } catch (e) {} } } };
+        })();
 
         // ================= 核心：纯正 MP3 转码引擎 =================
         async function convertToMp3Blob(arrayBuffer, progressCallback) {
@@ -2684,6 +2743,7 @@
             // 表现就是「解析第二条一直转不过来 / 播的还是上一条」。
             resetRefreshState();
             MobilePlayback.stop();
+            DesktopInlineVideo.stop();
             currentSingleData = null;
             currentShareUrl = '';
 
@@ -2733,9 +2793,12 @@
                 // 手机端统一走通用播放器：多线路择优 + 换链后真正切源 + 明确的失败出口
                 MobilePlayback.mount(data);
                 thumbnail.style.display = 'none';
+                DesktopInlineVideo.stop();
             } else {
                 MobilePlayback.stop();
                 thumbnail.style.display = 'block';
+                // 桌面端：解析成功后在信息卡下方内嵌视频预览（音频播放器在视频下方）
+                DesktopInlineVideo.mount(data);
             }
             
             const dlAudioBtn = document.getElementById('download-btn');
@@ -2798,7 +2861,11 @@
         
         player.addEventListener('loadedmetadata', () => durT.textContent = formatTime(player.duration));
         pBtn.addEventListener('click', () => {
-            if(player.paused) { player.play(); pBtn.querySelector('i').className = 'fa-solid fa-pause'; }
+            if(player.paused) {
+                // 音频和视频不能同时出声：播音频前先把内嵌视频暂停
+                DesktopInlineVideo.pause();
+                player.play(); pBtn.querySelector('i').className = 'fa-solid fa-pause';
+            }
             else { player.pause(); pBtn.querySelector('i').className = 'fa-solid fa-play ml-1'; }
         });
         player.addEventListener('timeupdate', () => {
@@ -3050,6 +3117,7 @@
                     return;
                 }
                 document.getElementById('real-audio-player').pause();
+                DesktopInlineVideo.pause();
                 document.getElementById('modal-video-title').textContent = currentSingleData.title;
                 vPlayer.src = proxify(currentSingleData.video_url);
                 vModal.classList.remove('hidden'); vModal.classList.add('flex');
