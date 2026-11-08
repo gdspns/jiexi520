@@ -16,7 +16,12 @@ function pickReferer(host: string): string | null {
     h.includes("douyinvod")
   )
     return "https://www.douyin.com/";
-  if (h.includes("xhscdn") || h.includes("xiaohongshu") || h.includes("xhs"))
+  if (
+    h.includes("xhscdn") ||
+    h.includes("xiaohongshu") ||
+    h.includes("xhs") ||
+    h.includes("momocdn")
+  )
     return "https://www.xiaohongshu.com/";
   if (h.includes("kuaishou") || h.includes("kwimgs") || h.includes("yximgs"))
     return "https://www.kuaishou.com/";
@@ -117,15 +122,41 @@ async function handle(request: Request): Promise<Response> {
   const range = request.headers.get("range");
   if (range) headers["Range"] = range;
 
-  let upstream: Response;
-  try {
-    upstream = await fetch(parsed.toString(), {
-      method: request.method === "HEAD" ? "HEAD" : "GET",
-      headers,
-      redirect: "follow",
-    });
-  } catch (err) {
-    return new Response("Upstream fetch failed: " + (err as Error).message, {
+  // 各家 CDN 的防盗链策略不一致：有的必须带 Referer，有的带了反而 403。
+  // 先按推断的 Referer 请求，遇到 401/403 再用纯 UA 重试一次。
+  const attemptHeaders: Record<string, string>[] = [headers];
+  if (ref) {
+    const bare: Record<string, string> = { "User-Agent": UA, Accept: "*/*" };
+    if (range) bare["Range"] = range;
+    attemptHeaders.push(bare);
+  }
+
+  let upstream: Response | null = null;
+  let lastError = "";
+  for (const attempt of attemptHeaders) {
+    try {
+      const response = await fetch(parsed.toString(), {
+        method: request.method === "HEAD" ? "HEAD" : "GET",
+        headers: attempt,
+        redirect: "follow",
+      });
+      if (response.ok || response.status === 206 || response.status === 304) {
+        upstream = response;
+        break;
+      }
+      if (response.status !== 401 && response.status !== 403) {
+        upstream = response;
+        break;
+      }
+      lastError = `upstream ${response.status}`;
+      await response.body?.cancel().catch(() => {});
+    } catch (err) {
+      lastError = (err as Error).message;
+    }
+  }
+
+  if (!upstream) {
+    return new Response("Upstream fetch failed: " + (lastError || "unknown"), {
       status: 502,
       headers: CORS,
     });
@@ -151,10 +182,18 @@ async function handle(request: Request): Promise<Response> {
   if (requestedType === "video" && !currentType.toLowerCase().startsWith("video/")) {
     respHeaders.set("content-type", "video/mp4");
   }
+  // iOS Safari 只有在明确声明分段支持时才会出时长/允许拖动；
+  // 上游 206 一定支持分段，缺省补上 bytes。
+  if (upstream.status === 206 && !respHeaders.has("accept-ranges")) {
+    respHeaders.set("accept-ranges", "bytes");
+  }
+  // 分段请求但上游返回 200（源站不支持 Range）：保持原样，播放器会自行整包读取。
   if (shouldDownload) {
     respHeaders.set("Content-Disposition", attachmentName(filename, "download"));
+    respHeaders.set("Cache-Control", "no-store");
+  } else {
+    respHeaders.set("Cache-Control", "public, max-age=3600");
   }
-  respHeaders.set("Cache-Control", "public, max-age=3600");
 
   return new Response(upstream.body, {
     status: upstream.status,

@@ -1095,7 +1095,7 @@
     </div>
 
     <!-- Notification Container -->
-    <div id="toast-container" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none"></div>
+    <div id="toast-container" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[2147483001] flex flex-col items-center gap-2 pointer-events-none"></div>
 
     <script>
         // ================= 配置区 =================
@@ -1237,6 +1237,7 @@
             if (!u) return u;
             if (u.startsWith('/api/public/media-stream')) return u;
             if (u.startsWith('/api/public/media-proxy')) {
+                if (/[?&]type=/.test(u)) return u;
                 return u + (u.includes('?') ? '&' : '?') + 'type=video';
             }
             return '/api/public/media-proxy?type=video&url=' + encodeURIComponent(u);
@@ -1279,102 +1280,96 @@
             return new Blob(mp3Data, { type: 'audio/mpeg' });
         }
 
-        // 手机端视频采用流式保存，避免先把大视频完整读入内存导致 Safari/安卓浏览器无响应。
-        async function promptMobileVideoSave(url, fileName) {
-            const streamUrl = url;
-            const isOverseasStream = url.startsWith('/api/public/media-stream');
-            const downloadUrl = isOverseasStream
-                ? url + (url.includes('?') ? '&' : '?') + 'download=1&filename=' + encodeURIComponent(fileName)
-                : url;
-            const overlay = document.createElement('div');
-            overlay.className = 'fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 backdrop-blur-sm px-4';
-            overlay.innerHTML = `
-                <div class="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl text-center">
-                    <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-500/20 text-blue-300"><i class="fa-solid fa-video"></i></div>
-                    <h3 class="text-lg font-bold text-white mb-2">正在准备视频文件</h3>
-                    <p class="mobile-save-status text-sm text-slate-300 mb-4">正在读取视频，请保持页面打开…</p>
-                    <div class="h-2 overflow-hidden rounded-full bg-slate-800 mb-4"><div class="mobile-save-progress h-full w-0 bg-gradient-to-r from-blue-500 to-indigo-500 transition-all"></div></div>
-                    <button type="button" class="mobile-save-cancel w-full py-2 text-sm text-slate-400">取消</button>
-                </div>`;
-            document.body.appendChild(overlay);
-            const activeVideo = document.getElementById('mobile-result-video');
-            const previousVideoDisplay = activeVideo.style.display;
-            activeVideo.pause();
-            activeVideo.style.display = 'none';
-            const restoreVideo = () => { activeVideo.style.display = previousVideoDisplay || 'block'; };
-            let cancelled = false;
-            overlay.querySelector('.mobile-save-cancel').addEventListener('click', () => { cancelled = true; restoreVideo(); overlay.remove(); });
-            overlay.addEventListener('click', (event) => { if (event.target === overlay) { cancelled = true; restoreVideo(); overlay.remove(); } });
-            const card = overlay.firstElementChild;
-            const status = overlay.querySelector('.mobile-save-status');
-            const progress = overlay.querySelector('.mobile-save-progress');
-            try {
-                const blob = await fetchVideoInChunks(url, (percent, received) => {
-                    if (cancelled) return;
-                    if (percent !== null) {
-                        progress.style.width = `${Math.min(100, percent)}%`;
-                        status.textContent = `正在准备视频 ${Math.round(percent)}%`;
-                    } else {
-                        status.textContent = `已读取 ${(received / 1048576).toFixed(1)} MB`;
-                    }
-                });
-                if (cancelled) return;
-                const safeName = String(fileName || 'video.mp4').replace(/[\\/:*?"<>|]/g, '').slice(0, 100) || 'video.mp4';
-                const file = new File([blob], safeName.endsWith('.mp4') ? safeName : safeName + '.mp4', { type: 'video/mp4' });
-                const blobUrl = URL.createObjectURL(file);
-                card.innerHTML = `
-                    <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-green-500/20 text-green-300"><i class="fa-solid fa-check"></i></div>
-                    <h3 class="text-lg font-bold text-white mb-2">视频已准备好</h3>
-                    <p class="text-sm text-slate-300 mb-4">点击下面按钮，在苹果系统菜单中选择“存储视频”。</p>
-                    <div class="space-y-2">
-                        <button type="button" class="mobile-share-file w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white">分享并存储到相册</button>
-                        <a class="block w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100" href="${blobUrl}" download="${file.name}">下载视频文件</a>
-                        <button type="button" class="mobile-open-fallback w-full py-2 text-sm text-slate-400">打开原视频</button>
-                        <button type="button" class="mobile-save-close w-full py-2 text-sm text-slate-500">关闭</button>
-                    </div>`;
-                card.querySelector('.mobile-share-file').addEventListener('click', async () => {
-                    try {
-                        if (!navigator.canShare || !navigator.canShare({ files: [file] })) throw new Error('当前浏览器不支持文件分享');
-                        await navigator.share({ files: [file], title: file.name });
-                    } catch (error) {
-                        if (error?.name !== 'AbortError') showToast('请使用 Safari 打开，或点击“下载视频文件”保存', 'info');
-                    }
-                });
-                card.querySelector('.mobile-open-fallback').addEventListener('click', () => window.open(streamUrl, '_blank', 'noopener'));
-                card.querySelector('.mobile-save-close').addEventListener('click', () => { URL.revokeObjectURL(blobUrl); restoreVideo(); overlay.remove(); });
-            } catch (error) {
-                if (cancelled) return;
-                card.innerHTML = `
-                    <h3 class="text-lg font-bold text-white mb-2">视频文件准备失败</h3>
-                    <p class="text-sm text-slate-300 mb-4">可尝试打开原视频后长按保存，或使用浏览器下载。</p>
-                    <div class="space-y-2">
-                        <a class="block w-full rounded-xl bg-blue-600 py-3 font-bold text-white" href="${streamUrl}" target="_blank" rel="noopener">打开原视频</a>
-                        <a class="block w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100" href="${downloadUrl}" target="_blank" rel="noopener">浏览器下载</a>
-                        <button type="button" class="mobile-save-close w-full py-2 text-sm text-slate-400">关闭</button>
-                    </div>`;
-                card.querySelector('.mobile-save-close').addEventListener('click', () => { restoreVideo(); overlay.remove(); });
-            }
+        // ================= 移动端保存视频 =================
+        // 安卓/UC 的 <video> 是原生图层，会盖在所有 DOM 弹窗之上。
+        // 打开任何弹窗前必须销毁 src，并用 !important 关掉 display（CSS 里的
+        // #mobile-result-video.is-ready-source{display:block!important} 会覆盖普通内联样式）。
+        function teardownMobileVideo() {
+            const v = document.getElementById('mobile-result-video');
+            if (!v) return null;
+            const snapshot = { src: v.getAttribute('src') || '' };
+            try { v.pause(); } catch (e) {}
+            v.removeAttribute('src');
+            try { v.load(); } catch (e) {}
+            v.classList.remove('is-ready-source');
+            v.style.setProperty('display', 'none', 'important');
+            v.style.setProperty('visibility', 'hidden', 'important');
+            const state = document.getElementById('mobile-video-state');
+            if (state) state.classList.add('hidden');
+            return snapshot;
         }
 
-        async function fetchVideoInChunks(url, onProgress) {
-            if (!/^https?:\/\//i.test(url)) {
-                const response = await fetchWithProgress(url, onProgress);
-                return response.blob();
+        function restoreMobileVideo(snapshot) {
+            const v = document.getElementById('mobile-result-video');
+            if (!v || !snapshot || !snapshot.src) return;
+            v.style.removeProperty('visibility');
+            v.style.removeProperty('display');
+            v.classList.add('is-ready-source');
+            v.setAttribute('src', snapshot.src);
+            try { v.load(); } catch (e) {}
+            // 恢复后重新盖上播放按钮，否则用户会看到一个没有控制条的视频
+            const state = document.getElementById('mobile-video-state');
+            const ready = document.getElementById('mobile-video-ready');
+            const spinner = document.getElementById('mobile-video-spinner');
+            if (ready) ready.style.display = 'flex';
+            if (spinner) spinner.style.display = 'none';
+            if (state) state.classList.remove('hidden');
+        }
+
+        // 同源下载地址：服务端带 Content-Disposition，交由浏览器下载管理器流式落盘，
+        // 安卓上不需要把整个视频读进内存，最稳、也不会卡。
+        function toDownloadUrl(url, fileName) {
+            const src = proxifyVideo(url);
+            const sep = src.includes('?') ? '&' : '?';
+            return src + sep + 'download=1&filename=' + encodeURIComponent(fileName || 'video.mp4');
+        }
+
+        function fetchWithTimeout(input, init = {}, timeoutMs = 20000) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            const external = init.signal;
+            if (external) {
+                if (external.aborted) controller.abort();
+                else external.addEventListener('abort', () => controller.abort(), { once: true });
             }
-            const probe = await fetch(url, {
+            return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+        }
+
+        // 通过同源代理分块读取视频：不会有跨域预检，也带上了正确的 Referer，
+        // 支持 Range 时按 2MB 分块（省内存），不支持时退回整体流式读取。
+        async function fetchMediaBlob(url, onProgress, signal) {
+            const src = proxifyVideo(url);
+            const probe = await fetchWithTimeout(src, {
                 headers: { Range: 'bytes=0-0' },
-                referrerPolicy: 'no-referrer',
-                cache: 'no-store'
-            });
-            if (!probe.ok) throw new Error('视频地址读取失败');
+                cache: 'no-store',
+                signal,
+            }, 25000);
+            if (!probe.ok) throw new Error('视频读取失败（' + probe.status + '）');
+
             const contentRange = probe.headers.get('Content-Range') || '';
-            const total = Number(contentRange.split('/')[1] || probe.headers.get('Content-Length') || 0);
-            if (!total || probe.status === 200) {
+            const total = Number(contentRange.split('/')[1] || 0);
+
+            if (probe.status !== 206 || !total) {
+                if (probe.status === 200 && probe.body && onProgress) {
+                    const cl = Number(probe.headers.get('Content-Length') || 0);
+                    const reader = probe.body.getReader();
+                    const chunks = [];
+                    let received = 0;
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        chunks.push(value);
+                        received += value.length;
+                        onProgress(cl ? (received / cl) * 100 : null, received);
+                    }
+                    return new Blob(chunks, { type: 'video/mp4' });
+                }
                 const blob = await probe.blob();
                 onProgress(100, blob.size);
                 return blob;
             }
-            const chunkSize = 4 * 1024 * 1024;
+
+            const chunkSize = 2 * 1024 * 1024;
             const chunks = [];
             let received = 0;
             for (let start = 0; start < total; start += chunkSize) {
@@ -1382,16 +1377,16 @@
                 let part = null;
                 for (let attempt = 0; attempt < 3 && !part; attempt++) {
                     try {
-                        const response = await fetch(url, {
+                        const response = await fetchWithTimeout(src, {
                             headers: { Range: `bytes=${start}-${end}` },
-                            referrerPolicy: 'no-referrer',
-                            cache: 'no-store'
-                        });
-                        if (response.status !== 206) throw new Error('分段响应异常');
+                            cache: 'no-store',
+                            signal,
+                        }, 25000);
+                        if (response.status !== 206) throw new Error('分段响应异常 ' + response.status);
                         part = await response.blob();
                     } catch (error) {
                         if (attempt === 2) throw error;
-                        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+                        await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
                     }
                 }
                 chunks.push(part);
@@ -1399,6 +1394,107 @@
                 onProgress((received / total) * 100, received);
             }
             return new Blob(chunks, { type: 'video/mp4' });
+        }
+
+        async function promptMobileVideoSave(url, fileName) {
+            const ua = navigator.userAgent || '';
+            const isIOS = /iPhone|iPad|iPod/i.test(ua);
+            const safeName = String(fileName || 'video.mp4').replace(/[\\/:*?"<>|]/g, '').slice(0, 100) || 'video.mp4';
+            const finalName = /\.(mp4|mov|m4v)$/i.test(safeName) ? safeName : safeName + '.mp4';
+            const downloadHref = toDownloadUrl(url, finalName);
+            const playHref = proxifyVideo(url);
+
+            const videoSnapshot = teardownMobileVideo();
+            let activeController = null;
+
+            const overlay = document.createElement('div');
+            overlay.className = 'fixed inset-0 z-[2147483000] flex items-center justify-center bg-black/85 backdrop-blur-sm px-4';
+            overlay.innerHTML = `
+                <div class="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl text-center">
+                    <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-500/20 text-blue-300"><i class="fa-solid fa-video"></i></div>
+                    <h3 class="text-lg font-bold text-white mb-2">保存视频</h3>
+                    <p class="save-tip text-sm text-slate-300 mb-4">${isIOS ? 'iPhone 请点“存入相册”，在系统菜单里选择“存储视频”。' : '点“立即下载”即可保存，视频较大时请在下载列表查看进度。'}</p>
+                    <div class="save-progress-wrap hidden mb-4">
+                        <div class="h-2 overflow-hidden rounded-full bg-slate-800 mb-2"><div class="save-progress h-full w-0 bg-gradient-to-r from-blue-500 to-indigo-500 transition-all"></div></div>
+                        <p class="save-status text-xs text-slate-400">正在读取视频…</p>
+                    </div>
+                    <div class="space-y-2">
+                        ${isIOS
+                            ? `<button type="button" class="save-share w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white">存入相册</button>
+                               <a class="save-direct block w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100" href="${downloadHref}" download="${finalName}">直接下载到“文件”</a>`
+                            : `<a class="save-direct block w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white" href="${downloadHref}" download="${finalName}">立即下载</a>
+                               <button type="button" class="save-share w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100">分享到相册</button>`}
+                        <a class="block w-full py-2 text-sm text-blue-300" href="${playHref}" target="_blank" rel="noopener">在浏览器播放（可长按保存）</a>
+                        <button type="button" class="save-close w-full py-2 text-sm text-slate-500">关闭</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+
+            const progressWrap = overlay.querySelector('.save-progress-wrap');
+            const progressBar = overlay.querySelector('.save-progress');
+            const statusEl = overlay.querySelector('.save-status');
+            const shareBtn = overlay.querySelector('.save-share');
+            const directLink = overlay.querySelector('.save-direct');
+
+            const close = () => {
+                if (activeController) { try { activeController.abort(); } catch (e) {} }
+                overlay.remove();
+                restoreMobileVideo(videoSnapshot);
+            };
+            overlay.querySelector('.save-close').addEventListener('click', close);
+            overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
+
+            if (shareBtn) {
+                shareBtn.addEventListener('click', async () => {
+                    if (shareBtn.dataset.busy === '1') return;
+                    shareBtn.dataset.busy = '1';
+                    shareBtn.disabled = true;
+                    activeController = new AbortController();
+                    progressWrap.classList.remove('hidden');
+                    statusEl.textContent = '正在读取视频…';
+                    try {
+                        const blob = await fetchMediaBlob(url, (percent, received) => {
+                            if (percent === null) {
+                                statusEl.textContent = `已读取 ${(received / 1048576).toFixed(1)} MB`;
+                            } else {
+                                progressBar.style.width = `${Math.min(100, percent)}%`;
+                                statusEl.textContent = `正在读取视频 ${Math.round(percent)}%`;
+                            }
+                        }, activeController.signal);
+                        const file = new File([blob], finalName, { type: 'video/mp4' });
+                        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                            await navigator.share({ files: [file], title: finalName });
+                            showToast('✅ 请在系统菜单中选择“存储视频”', 'success');
+                            close();
+                            return;
+                        }
+                        const blobUrl = URL.createObjectURL(file);
+                        const a = document.createElement('a');
+                        a.href = blobUrl;
+                        a.download = finalName;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+                        showToast('已开始下载，请到“文件”或“下载”中查看', 'success');
+                        close();
+                    } catch (error) {
+                        if (error?.name === 'AbortError') { statusEl.textContent = '已取消'; return; }
+                        progressWrap.classList.add('hidden');
+                        overlay.querySelector('.save-tip').textContent = '读取失败，请改用“直接下载”，或点下方在浏览器播放后长按保存。';
+                        showToast(error?.message || '读取失败，请改用直接下载', 'error');
+                    } finally {
+                        shareBtn.dataset.busy = '0';
+                        shareBtn.disabled = false;
+                    }
+                });
+            }
+
+            if (directLink) {
+                directLink.addEventListener('click', () => {
+                    showToast(isIOS ? '已开始下载，请到“文件”App 查看' : '已开始下载，请在通知栏或下载列表查看进度', 'success');
+                });
+            }
         }
 
         async function saveMobileImages(images, indexes = null) {
@@ -1493,8 +1589,9 @@
             function promptMobileSave(file) {
                 return new Promise((resolve) => {
                     const blobUrl = window.URL.createObjectURL(file);
+                    const videoSnapshot = teardownMobileVideo();
                     const overlay = document.createElement('div');
-                    overlay.className = 'fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4';
+                    overlay.className = 'fixed inset-0 z-[2147483000] flex items-center justify-center bg-black/85 backdrop-blur-sm px-4';
                     overlay.innerHTML = `
                         <div class="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl text-center">
                             <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-primary-500/20 text-primary-300">
@@ -1511,6 +1608,7 @@
                     document.body.appendChild(overlay);
                     const finish = (saved) => {
                         overlay.remove();
+                        restoreMobileVideo(videoSnapshot);
                         setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
                         resolve(saved);
                     };
@@ -1694,7 +1792,13 @@
             if (isMobileLayout() && data.video_url) {
                 mobileVideo.poster = data.cover || '';
                 mobileVideo.controls = false;
-                mobileVideo.dataset.fallbackUsed = '0';
+                // 播放源优先级：同源代理（服务端补 Referer / 透传 Range，iOS 才能出时长和拖动）
+                // → ffmpeg 转码兜底（极端编码或源站拒绝）
+                const playSources = [
+                    proxifyVideo(data.video_url),
+                    '/api/public/video-compat?url=' + encodeURIComponent(data.video_url),
+                ];
+                mobileVideo.dataset.stage = '0';
                 videoState.classList.remove('hidden');
                 videoSpinner.style.display = 'block';
                 videoStatus.textContent = '视频加载中…';
@@ -1712,13 +1816,15 @@
                 mobileVideo.onloadedmetadata = markVideoReady;
                 mobileVideo.onplaying = () => videoState.classList.add('hidden');
                 mobileVideo.onerror = () => {
-                    if (mobileVideo.dataset.fallbackUsed === '0' && /^https?:\/\//i.test(data.video_url)) {
-                        mobileVideo.dataset.fallbackUsed = '1';
+                    const stage = Number(mobileVideo.dataset.stage || 0);
+                    if (stage + 1 < playSources.length) {
+                        mobileVideo.dataset.stage = String(stage + 1);
+                        videoState.classList.remove('hidden');
                         videoSpinner.style.display = 'block';
                         videoReady.style.display = 'none';
                         videoStatus.style.display = 'block';
                         videoStatus.textContent = '正在转换为兼容格式…';
-                        mobileVideo.src = '/api/public/video-compat?url=' + encodeURIComponent(data.video_url);
+                        mobileVideo.src = playSources[stage + 1];
                         mobileVideo.load();
                         return;
                     }
@@ -1727,7 +1833,7 @@
                     videoStatus.style.display = 'block';
                     videoStatus.textContent = data.video_url.startsWith('/api/public/media-stream')
                         ? '海外视频线路暂时不可用，请稍后重试'
-                        : '视频直链加载失败，请重新解析获取新链接';
+                        : '视频加载失败，可点下方“保存到相册”下载后观看';
                 };
                 videoReady.onclick = async () => {
                     videoState.classList.add('hidden');
@@ -1741,23 +1847,17 @@
                         videoReady.style.display = 'flex';
                     }
                 };
-                const ua = navigator.userAgent || '';
-                const isIOSWebKit = /iPhone|iPad|iPod/i.test(ua);
-                const isUCBrowser = /UCBrowser|UCWEB/i.test(ua);
-                const needsIOSCompat = data.platform === '抖音' && isIOSWebKit && !isUCBrowser;
-                mobileVideo.dataset.fallbackUsed = needsIOSCompat ? '1' : '0';
-                mobileVideo.src = needsIOSCompat
-                    ? '/api/public/video-compat?url=' + encodeURIComponent(data.video_url)
-                    : data.video_url;
+                mobileVideo.src = playSources[0];
                 mobileVideo.classList.add('is-ready-source');
                 mobileVideo.style.display = 'block';
+                mobileVideo.style.removeProperty('visibility');
                 mobileVideo.load();
                 thumbnail.style.display = 'none';
             } else {
                 mobileVideo.pause();
                 mobileVideo.removeAttribute('src');
                 mobileVideo.classList.remove('is-ready-source');
-                mobileVideo.style.display = 'none';
+                mobileVideo.style.setProperty('display', 'none', 'important');
                 videoState.classList.add('hidden');
                 thumbnail.style.display = 'block';
             }
