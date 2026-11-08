@@ -31,7 +31,43 @@ curl -I http://127.0.0.1:3000/index.html
 镜像构建过程中如果卡在 `yt-dlp` 下载（国内网络拉 GitHub 经常失败），
 Dockerfile 已经做了 5 次重试 + pip 兜底，不会因此整体失败。
 
-## 三、不用 Docker（裸机 / 宝塔 / PM2）
+## 三、MiniPaaS / 宝塔 / 1Panel 这类面板
+
+面板一般有两种构建方式，按优先级选：
+
+**A. 能识别 Dockerfile（首选）** —— 直接选它，把 `Dockerfile` 作为构建方式，
+端口填 `3000`，其余不用配。Dockerfile 里已经把 Node 22、bun、ffmpeg、python3、
+yt-dlp 全部装好。
+
+**B. 只能填命令（Nixpacks / Node 构建包）** —— 三个字段必须这样填：
+
+| 字段 | 值 |
+|---|---|
+| 运行时版本 | Node **22**（最低 20.19，Node 18 会失败） |
+| 安装命令 | `bun install --frozen-lockfile`（先 `npm i -g bun@1.3.3`） |
+| 构建命令 | `bun run build` |
+| 启动命令 | `node .output/server/index.mjs` |
+| 端口 | `3000`（并设置 `HOST=0.0.0.0`） |
+
+面板如果用 `npm install` 而不是 bun，也会成功——仓库里加了 `.npmrc`，
+把依赖的生命周期脚本关掉了。原因是 `youtube-dl-exec` 在安装时会强制检查
+python3、还会从 GitHub 下载 yt-dlp 二进制，国内网络下这一步几乎必失败，
+表现就是「安装依赖阶段部署失败」。
+
+但**运行时仍然需要 yt-dlp 和 ffmpeg**（海外视频解析、iOS 兼容转码要用）：
+
+```bash
+sudo apt-get update && sudo apt-get install -y python3 ffmpeg curl ca-certificates
+sudo curl -fsSL -o /usr/local/bin/yt-dlp \
+  https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp   # 失败就用 pip
+sudo chmod +x /usr/local/bin/yt-dlp
+# 拉不下来时改用：
+# sudo apt-get install -y python3-pip && sudo pip3 install -U yt-dlp --break-system-packages
+```
+
+然后在面板的环境变量里加一条 `YOUTUBE_DL_PATH=/usr/local/bin/yt-dlp`。
+
+## 四、不用 Docker（裸机 / systemd）
 
 ```bash
 # 系统依赖：ffmpeg 用于视频转码，python3 供 yt-dlp 使用
@@ -78,7 +114,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now jiexi520
 sudo journalctl -u jiexi520 -f
 ```
 
-## 四、Nginx 反代
+## 五、Nginx 反代
 
 SSR 站点要把请求转给 Node，不要配 `root`：
 
@@ -103,7 +139,7 @@ server {
 }
 ```
 
-## 五、环境变量
+## 六、环境变量
 
 | 变量 | 是否必需 | 说明 |
 |---|---|---|
@@ -117,7 +153,7 @@ server {
 `.env` 被 `.dockerignore` 排除，不会进镜像；Docker 部署请在 `docker-compose.yml` 里用
 `env_file` 或 `-e` 传入，裸机部署用 systemd 的 `EnvironmentFile`。
 
-## 六、部署失败怎么自查
+## 七、部署失败怎么自查
 
 按顺序看，基本能定位到 90% 的问题：
 
