@@ -3309,16 +3309,24 @@
           <div class="mobile-mine-card">
             ${!isAdmin ? '<button id="mobile-mine-recharge" class="mobile-account-action"><i class="fa-solid fa-bolt"></i>充值解析次数</button>' : ''}
             ${isAdmin ? '<a class="mobile-account-action" href="/admin"><i class="fa-solid fa-gear"></i>管理后台</a>' : ''}
+            <button id="mobile-mine-password" class="mobile-account-action"><i class="fa-solid fa-key"></i>修改密码</button>
             <button id="mobile-mine-guide" class="mobile-account-action"><i class="fa-solid fa-book-open"></i>使用教程</button>
             <button id="mobile-mine-logout" class="mobile-account-action danger"><i class="fa-solid fa-right-from-bracket"></i>退出登录</button>
           </div>
           <p class="mobile-notice">解析次数与网站账户保持一致。</p>`;
         document.getElementById("mobile-mine-recharge")?.addEventListener("click", () => { closeMobileSheets(); window.__openRecharge && window.__openRecharge(); });
+        document.getElementById("mobile-mine-password")?.addEventListener("click", () => { closeMobileSheets(); setTimeout(() => openPasswordModal(), 140); });
         document.getElementById("mobile-mine-guide")?.addEventListener("click", () => openMobileSheet("mobile-guide-sheet"));
         document.getElementById("mobile-mine-logout")?.addEventListener("click", async () => { await sb.auth.signOut(); closeMobileSheets(); location.reload(); });
       }
 
+      let _lastBarKey = "";
       function renderBar() {
+        // 3 秒轮询会反复调用 renderBar，若签名没变就复用现有 DOM，
+        // 否则会把正在展开的账户下拉菜单一起清掉。
+        const barKey = currentUser ? `${currentUser.id}|${currentUser.email}|${isAdmin}|${userCredits}` : "anon";
+        if (barKey === _lastBarKey && bar.childElementCount) { renderMobileMine(); return; }
+        _lastBarKey = barKey;
         bar.innerHTML = "";
         if (!currentUser) {
           const a = document.createElement("a");
@@ -3329,10 +3337,62 @@
           renderMobileMine();
           return;
         }
-        const tag = document.createElement("span");
-        tag.textContent = currentUser.email;
-        tag.style.cssText = "color:#cbd5e1;font-size:12px;padding:6px 10px;background:rgba(15,23,42,0.7);border-radius:8px;border:1px solid #334155;";
-        bar.appendChild(tag);
+        // ===== 顶部账户：小头像 + 邮箱，点击展开菜单 =====
+        const emailText = String(currentUser.email || "已登录用户");
+        const initial = (emailText.trim().charAt(0) || "U").toUpperCase();
+        const account = document.createElement("div");
+        account.style.cssText = "position:relative;";
+
+        const trigger = document.createElement("button");
+        trigger.type = "button";
+        trigger.id = "account-trigger";
+        trigger.setAttribute("aria-haspopup", "true");
+        trigger.setAttribute("aria-expanded", "false");
+        trigger.title = emailText;
+        trigger.style.cssText = "display:flex;align-items:center;gap:7px;padding:4px 9px 4px 4px;border-radius:999px;border:1px solid #334155;background:rgba(15,23,42,0.7);color:#e2e8f0;cursor:pointer;backdrop-filter:blur(8px);font-size:12px;font-weight:500;max-width:230px;line-height:1.2;";
+        const avatar = document.createElement("span");
+        avatar.textContent = initial;
+        avatar.style.cssText = "width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#db2777,#9333ea);color:#fff;font-size:12px;font-weight:700;flex:0 0 auto;";
+        const mailLabel = document.createElement("span");
+        mailLabel.textContent = emailText;
+        mailLabel.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;";
+        const caret = document.createElement("i");
+        caret.className = "fa-solid fa-chevron-down";
+        caret.style.cssText = "font-size:9px;opacity:.6;flex:0 0 auto;";
+        trigger.append(avatar, mailLabel, caret);
+
+        const menu = document.createElement("div");
+        menu.id = "account-menu";
+        menu.style.cssText = "position:absolute;top:calc(100% + 8px);right:0;min-width:196px;background:#0f172a;border:1px solid #334155;border-radius:12px;box-shadow:0 18px 44px rgba(0,0,0,.5);padding:6px;display:none;z-index:10010;";
+        const menuEmail = document.createElement("div");
+        menuEmail.textContent = emailText;
+        menuEmail.style.cssText = "padding:7px 10px 9px;font-size:11px;color:#94a3b8;border-bottom:1px solid #1e293b;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+        const itemStyle = "display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border:0;border-radius:8px;background:transparent;color:#e2e8f0;font-size:13px;cursor:pointer;text-align:left;font-family:inherit;";
+        const pwdBtn = document.createElement("button");
+        pwdBtn.type = "button";
+        pwdBtn.id = "account-change-password";
+        pwdBtn.innerHTML = '<i class="fa-solid fa-key" style="width:14px;color:#f9a8d4"></i> 修改密码';
+        pwdBtn.style.cssText = itemStyle;
+        pwdBtn.onmouseenter = () => { pwdBtn.style.background = "#1e293b"; };
+        pwdBtn.onmouseleave = () => { pwdBtn.style.background = "transparent"; };
+        pwdBtn.onclick = () => { closeAccountMenu(); openPasswordModal(); };
+        const logoutBtn = document.createElement("button");
+        logoutBtn.type = "button";
+        logoutBtn.innerHTML = '<i class="fa-solid fa-right-from-bracket" style="width:14px;color:#fca5a5"></i> 退出登录';
+        logoutBtn.style.cssText = itemStyle + "color:#fca5a5;";
+        logoutBtn.onmouseenter = () => { logoutBtn.style.background = "#1e293b"; };
+        logoutBtn.onmouseleave = () => { logoutBtn.style.background = "transparent"; };
+        logoutBtn.onclick = async () => { await sb.auth.signOut(); location.reload(); };
+        menu.append(menuEmail, pwdBtn, logoutBtn);
+        account.append(trigger, menu);
+        bar.appendChild(account);
+
+        trigger.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const open = menu.style.display !== "none";
+          menu.style.display = open ? "none" : "block";
+          trigger.setAttribute("aria-expanded", open ? "false" : "true");
+        });
         const credit = document.createElement("span");
         const low = (userCredits !== null && userCredits <= 0 && !isAdmin);
         credit.innerHTML = isAdmin
@@ -3355,13 +3415,103 @@
           adm.style.cssText = btnStyle + "text-decoration:none;color:#f9a8d4;border-color:#db2777;";
           bar.appendChild(adm);
         }
-        const out = document.createElement("button");
-        out.textContent = "退出";
-        out.style.cssText = btnStyle;
-        out.onclick = async () => { await sb.auth.signOut(); location.reload(); };
-        bar.appendChild(out);
         renderMobileMine();
       }
+
+      // ===== 账户菜单 =====
+      function closeAccountMenu() {
+        const m = document.getElementById("account-menu");
+        const t = document.getElementById("account-trigger");
+        if (m) m.style.display = "none";
+        if (t) t.setAttribute("aria-expanded", "false");
+      }
+      document.addEventListener("click", (e) => {
+        const m = document.getElementById("account-menu");
+        if (!m || m.style.display === "none") return;
+        if (!e.target.closest("#account-trigger") && !e.target.closest("#account-menu")) closeAccountMenu();
+      });
+
+      // ===== 修改密码弹窗（旧密码校验，无需验证码） =====
+      function pwdError(msg) {
+        const el = document.getElementById("password-error");
+        if (!el) return;
+        el.textContent = msg || "";
+        el.style.display = msg ? "block" : "none";
+      }
+      function openPasswordModal() {
+        closeAccountMenu();
+        const modal = document.getElementById("password-modal");
+        if (!modal) return;
+        if (!currentUser) { requireLogin("修改密码"); return; }
+        const form = document.getElementById("password-form");
+        if (form) form.reset();
+        pwdError("");
+        const hint = document.getElementById("password-email-hint");
+        if (hint) hint.textContent = currentUser.email || "";
+        modal.classList.remove("hidden");
+        setTimeout(() => document.getElementById("old-password")?.focus(), 80);
+      }
+      function closePasswordModal() {
+        document.getElementById("password-modal")?.classList.add("hidden");
+        const btn = document.getElementById("password-submit");
+        if (btn) { btn.disabled = false; btn.textContent = "确认修改"; }
+      }
+      window.__openPasswordModal = openPasswordModal;
+
+      document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        closeAccountMenu();
+        const modal = document.getElementById("password-modal");
+        if (modal && !modal.classList.contains("hidden")) closePasswordModal();
+      });
+
+      document.getElementById("password-modal")?.addEventListener("click", (e) => {
+        if (e.target.id === "password-modal") closePasswordModal();
+      });
+      document.getElementById("password-modal-close")?.addEventListener("click", closePasswordModal);
+      document.getElementById("password-cancel")?.addEventListener("click", closePasswordModal);
+
+      document.getElementById("password-form")?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const oldPwd = (document.getElementById("old-password")?.value || "");
+        const newPwd = (document.getElementById("new-password")?.value || "");
+        const confirmPwd = (document.getElementById("confirm-password")?.value || "");
+        if (!currentUser) { pwdError("登录状态已失效，请重新登录后再试"); return; }
+        if (!oldPwd) { pwdError("请输入旧密码"); return; }
+        if (newPwd.length < 6) { pwdError("新密码至少需要 6 位"); return; }
+        if (newPwd !== confirmPwd) { pwdError("两次输入的新密码不一致"); return; }
+        if (newPwd === oldPwd) { pwdError("新密码不能与旧密码相同"); return; }
+
+        pwdError("");
+        const btn = document.getElementById("password-submit");
+        if (btn) { btn.disabled = true; btn.textContent = "正在修改…"; }
+        try {
+          const email = currentUser.email;
+          // 用旧密码重新登录一次：密码错误时 Supabase 会返回 invalid login credentials
+          const { error: verifyErr } = await sb.auth.signInWithPassword({ email, password: oldPwd });
+          if (verifyErr) {
+            const t = String(verifyErr.message || "");
+            if (/invalid login credentials/i.test(t)) throw new Error("旧密码不正确");
+            if (/too many|rate limit/i.test(t)) throw new Error("尝试次数过多，请稍后再试");
+            if (/confirm/i.test(t)) throw new Error("邮箱尚未验证，请先在登录页重新验证邮箱");
+            throw new Error(t || "旧密码验证失败");
+          }
+          const { error: updErr } = await sb.auth.updateUser({ password: newPwd });
+          if (updErr) {
+            const t = String(updErr.message || "");
+            if (/should be different|same.*password/i.test(t)) throw new Error("新密码不能与旧密码相同");
+            if (/weak|at least|6 characters/i.test(t)) throw new Error("新密码强度不足，请至少 6 位");
+            throw new Error(t || "密码修改失败，请稍后再试");
+          }
+          closePasswordModal();
+          showToast && showToast("密码修改成功，下次请用新密码登录", "success");
+          try { await refreshAuth(); } catch {}
+        } catch (err) {
+          pwdError(err?.message || "密码修改失败，请稍后再试");
+        } finally {
+          if (btn) { btn.disabled = false; btn.textContent = "确认修改"; }
+        }
+      });
 
       let _refreshInflight = null;
       async function refreshAuth() {
@@ -3496,6 +3646,33 @@
         }, true);
       }
     </script>
+
+    <!-- ============ 修改密码弹窗 ============ -->
+    <div id="password-modal" class="hidden fixed inset-0 z-[10030] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+          <h3 class="text-base font-bold text-white"><i class="fa-solid fa-key text-pink-400"></i> 修改密码</h3>
+          <button id="password-modal-close" type="button" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+        </div>
+        <form id="password-form" class="p-5" novalidate>
+          <p class="text-xs text-slate-400 mb-4">当前账户：<span id="password-email-hint" class="text-slate-300 break-all"></span></p>
+          <label class="block text-sm text-slate-300 mb-1" for="old-password">旧密码</label>
+          <input id="old-password" type="password" autocomplete="current-password" placeholder="请输入当前登录密码"
+                 class="w-full px-4 py-3 rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-pink-500 mb-4" />
+          <label class="block text-sm text-slate-300 mb-1" for="new-password">新密码</label>
+          <input id="new-password" type="password" autocomplete="new-password" placeholder="至少 6 位"
+                 class="w-full px-4 py-3 rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-pink-500 mb-4" />
+          <label class="block text-sm text-slate-300 mb-1" for="confirm-password">确认新密码</label>
+          <input id="confirm-password" type="password" autocomplete="new-password" placeholder="再输入一次新密码"
+                 class="w-full px-4 py-3 rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-pink-500" />
+          <p id="password-error" class="hidden text-sm text-red-400 mt-3"></p>
+          <div class="flex gap-3 mt-5">
+            <button type="button" id="password-cancel" class="flex-1 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-medium border border-slate-700 transition-colors">取消</button>
+            <button type="submit" id="password-submit" class="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white text-sm font-semibold transition-colors shadow-lg">确认修改</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <!-- ============ 充值弹窗 ============ -->
     <div id="recharge-modal" class="hidden fixed inset-0 z-[10000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
