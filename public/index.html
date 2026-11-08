@@ -3393,7 +3393,7 @@
         const inviteBtn = document.createElement("button");
         inviteBtn.type = "button";
         inviteBtn.id = "invite-entry";
-        inviteBtn.title = "拉新人奖励：邀请好友注册得解析次数";
+        inviteBtn.title = "拉新人奖励：邀请好友注册得解析次数，好友首次充值再奖你次数";
         inviteBtn.innerHTML = '<span style="font-size:13px;line-height:1">🎁</span><span>拉新人奖励</span>';
         inviteBtn.style.cssText = "display:flex;align-items:center;gap:5px;padding:5px 11px;border-radius:999px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid rgba(251,191,36,.45);background:linear-gradient(135deg,rgba(251,191,36,.18),rgba(244,63,94,.16));color:#fcd34d;backdrop-filter:blur(8px);font-family:inherit;white-space:nowrap;";
         inviteBtn.onmouseenter = () => { inviteBtn.style.borderColor = "rgba(251,191,36,.8)"; };
@@ -3563,18 +3563,19 @@
         let rewardInviter = 3;
         let rewardInvitee = 2;
         let dailyLimit = 20;
+        let rewardRecharge = 0;
         let rows = [];
         try {
           const [pRes, rRes, sRes] = await Promise.all([
             sb.from("profiles").select("invite_code").eq("id", currentUser.id).maybeSingle(),
             sb.from("invites")
-              .select("invitee_email, inviter_credits, invitee_credits, created_at")
+              .select("invitee_email, inviter_credits, invitee_credits, first_recharge_credits, created_at")
               .eq("inviter_id", currentUser.id)
               .order("created_at", { ascending: false })
               .limit(50),
             sb.from("app_settings")
               .select("key,value")
-              .in("key", ["invite_reward_inviter", "invite_reward_invitee", "invite_daily_limit"]),
+              .in("key", ["invite_reward_inviter", "invite_reward_invitee", "invite_daily_limit", "invite_reward_recharge"]),
           ]);
           code = (pRes.data && pRes.data.invite_code) || "";
           if (rRes.data) rows = rRes.data;
@@ -3583,6 +3584,7 @@
           if (Number.isFinite(map.invite_reward_inviter)) rewardInviter = map.invite_reward_inviter;
           if (Number.isFinite(map.invite_reward_invitee)) rewardInvitee = map.invite_reward_invitee;
           if (Number.isFinite(map.invite_daily_limit)) dailyLimit = map.invite_daily_limit;
+          if (Number.isFinite(map.invite_reward_recharge)) rewardRecharge = map.invite_reward_recharge;
         } catch (e) {
           console.warn("invite load failed", e);
         }
@@ -3590,18 +3592,34 @@
         const link = code ? inviteShareUrl(code) : "";
         const total = rows.length;
         const earned = rows.reduce((s, r) => s + (Number(r.inviter_credits) || 0), 0);
+        const rechargeEarned = rows.reduce((s, r) => s + (Number(r.first_recharge_credits) || 0), 0);
         const listHtml = total
           ? '<div class="divide-y divide-slate-800">' + rows.slice(0, 10).map((r) => {
               const got = Number(r.inviter_credits) || 0;
+              const rechargeGot = Number(r.first_recharge_credits) || 0;
               return `<div class="flex items-center justify-between px-3 py-2.5">
                 <div class="min-w-0">
                   <p class="text-xs text-slate-200 truncate">${maskInviteEmail(r.invitee_email)}</p>
                   <p class="text-[10px] text-slate-500 mt-0.5">${fmtInviteDate(r.created_at)}</p>
                 </div>
-                <span class="text-[11px] whitespace-nowrap ml-2 ${got > 0 ? "text-amber-300" : "text-slate-500"}">${got > 0 ? "+" + got + " 次" : "超每日上限"}</span>
+                <div class="text-right ml-2 whitespace-nowrap">
+                  <span class="text-[11px] ${got > 0 ? "text-amber-300" : "text-slate-500"}">${got > 0 ? "+" + got + " 次" : "超每日上限"}</span>
+                  ${rechargeGot > 0 ? `<p class="text-[10px] text-emerald-300 mt-0.5">首充再 +${rechargeGot} 次</p>` : ""}
+                </div>
               </div>`;
             }).join("") + "</div>"
           : '<p class="px-3 py-6 text-center text-xs text-slate-500">还没有邀请记录，把链接发给好友试试</p>';
+
+        const rechargeBlock = rewardRecharge > 0
+          ? `<div class="mt-3 rounded-2xl border-2 border-amber-400 bg-gradient-to-r from-amber-500 to-rose-500 p-1">
+              <div class="rounded-xl bg-slate-950 px-4 py-4 text-center">
+                <p class="text-[11px] font-bold tracking-widest text-amber-400">限时加码 · 首充再奖</p>
+                <p class="mt-2 text-lg font-black text-white leading-tight">好友首次充值</p>
+                <p class="mt-1 text-4xl font-black text-amber-300 leading-none">+${rewardRecharge}<span class="text-xl ml-1">次</span></p>
+                <p class="mt-2 text-xs text-amber-100/80">直接奖给邀请人（你），到账自动发放</p>
+              </div>
+            </div>`
+          : "";
 
         body.innerHTML = `
           <div class="rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-rose-500/10 p-4">
@@ -3612,6 +3630,8 @@
               <span>好友得 <b class="text-pink-300 text-base">${rewardInvitee}</b> 次</span>
             </div>
           </div>
+
+          ${rechargeBlock}
 
           <p class="mt-4 text-xs text-slate-400">我的邀请链接</p>
           <div class="mt-1 flex gap-2">
@@ -3630,7 +3650,11 @@
             </div>
             <div class="rounded-xl bg-slate-800/70 border border-slate-700 p-3 text-center">
               <p class="text-xl font-bold text-amber-300">${earned}</p>
-              <p class="text-[11px] text-slate-400 mt-0.5">累计获得次数</p>
+              <p class="text-[11px] text-slate-400 mt-0.5">注册奖励次数</p>
+            </div>
+            <div class="rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-3 text-center col-span-2">
+              <p class="text-xl font-bold text-emerald-300">${rechargeEarned}</p>
+              <p class="text-[11px] text-emerald-200/70 mt-0.5">首充加码累计获得次数</p>
             </div>
           </div>
 
@@ -3638,7 +3662,9 @@
           <div class="rounded-xl border border-slate-700 overflow-hidden">${listHtml}</div>
 
           <p class="mt-3 text-[11px] leading-relaxed text-slate-500">
-            好友需通过你的链接注册（QQ / 163 / 新浪邮箱），同一个新账号只计一次；每位邀请人每天最多计 ${dailyLimit} 位，超出仍然记录但不发次数。
+            好友需通过你的链接注册（QQ / 163 / 新浪邮箱），同一个新账号只计一次；
+            ${rewardRecharge > 0 ? `好友<b class="text-emerald-300">首次充值</b>成功后再奖你 ${rewardRecharge} 次（每人只算一次）；` : ""}
+            每位邀请人每天最多计 ${dailyLimit} 位，超出仍然记录但不发次数。
           </p>`;
 
         const copyLinkBtn = document.getElementById("invite-copy-link");

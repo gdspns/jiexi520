@@ -217,12 +217,16 @@ export type InviteReportRow = {
   invitee_count: number;
   credits_granted: number;
   credits_to_invitees: number;
+  recharge_credits: number;
+  recharge_count: number;
   last_invited_at: string | null;
   invitees: Array<{
     email: string | null;
     created_at: string;
     inviter_credits: number;
     invitee_credits: number;
+    first_recharge_credits?: number;
+    first_recharge_at?: string | null;
   }>;
 };
 
@@ -244,7 +248,7 @@ export const getInviteConfig = createServerFn({ method: "GET" })
     const { data, error } = await supabase
       .from("app_settings")
       .select("key,value")
-      .in("key", ["invite_reward_inviter", "invite_reward_invitee", "invite_daily_limit"]);
+      .in("key", ["invite_reward_inviter", "invite_reward_invitee", "invite_daily_limit", "invite_reward_recharge"]);
     if (error) throw new Error(error.message);
     const map = new Map<string, number>();
     (data ?? []).forEach((r: any) => map.set(r.key, Number(r.value)));
@@ -253,6 +257,7 @@ export const getInviteConfig = createServerFn({ method: "GET" })
       inviter: pick("invite_reward_inviter", 3),
       invitee: pick("invite_reward_invitee", 2),
       dailyLimit: pick("invite_daily_limit", 20),
+      recharge: pick("invite_reward_recharge", 50),
     };
   });
 
@@ -264,6 +269,7 @@ export const setInviteRewards = createServerFn({ method: "POST" })
         inviter: z.number().int().min(0).max(100000),
         invitee: z.number().int().min(0).max(100000),
         dailyLimit: z.number().int().min(1).max(10000),
+        recharge: z.number().int().min(0).max(100000),
       })
       .parse(input),
   )
@@ -274,6 +280,7 @@ export const setInviteRewards = createServerFn({ method: "POST" })
       p_inviter: data.inviter,
       p_invitee: data.invitee,
       p_daily_limit: data.dailyLimit,
+      p_recharge: data.recharge,
     });
     if (error) throw new Error(error.message);
     return { ok: true };

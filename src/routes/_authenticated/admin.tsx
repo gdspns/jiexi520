@@ -1013,12 +1013,16 @@ type InviteReportRow = {
   invitee_count: number;
   credits_granted: number;
   credits_to_invitees: number;
+  recharge_credits?: number;
+  recharge_count?: number;
   last_invited_at: string | null;
   invitees: Array<{
     email: string | null;
     created_at: string;
     inviter_credits: number;
     invitee_credits: number;
+    first_recharge_credits?: number;
+    first_recharge_at?: string | null;
   }>;
 };
 
@@ -1033,6 +1037,7 @@ function InvitesPanel() {
   const [rewardInviter, setRewardInviter] = useState<number | "">("");
   const [rewardInvitee, setRewardInvitee] = useState<number | "">("");
   const [dailyLimit, setDailyLimit] = useState<number | "">("");
+  const [rechargeReward, setRechargeReward] = useState<number | "">("");
   const [saving, setSaving] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -1042,11 +1047,13 @@ function InvitesPanel() {
     setRewardInviter(c.inviter);
     setRewardInvitee(c.invitee);
     setDailyLimit(c.dailyLimit);
+    setRechargeReward(c.recharge);
   }, [cfg.data]);
 
   const rows = (report.data || []) as InviteReportRow[];
   const totalInvitees = rows.reduce((s, r) => s + (r.invitee_count || 0), 0);
   const totalGranted = rows.reduce((s, r) => s + (r.credits_granted || 0), 0);
+  const totalRecharge = rows.reduce((s, r) => s + (r.recharge_credits || 0), 0);
   const todayStr = new Date().toDateString();
   const todayInvites = rows.reduce(
     (s, r) => s + (r.invitees || []).filter((i) => new Date(i.created_at).toDateString() === todayStr).length,
@@ -1057,13 +1064,17 @@ function InvitesPanel() {
     const a = Number(rewardInviter);
     const b = Number(rewardInvitee);
     const c = Number(dailyLimit);
-    if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c) || a < 0 || b < 0 || c < 1) {
-      alert("请填写有效数字：邀请人/被邀请人次数不能为负，每日上限至少 1");
+    const d = Number(rechargeReward);
+    if (
+      !Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c) || !Number.isFinite(d) ||
+      a < 0 || b < 0 || d < 0 || c < 1
+    ) {
+      alert("请填写有效数字：邀请人/被邀请人/首充奖励次数不能为负，每日上限至少 1");
       return;
     }
     setSaving(true);
     try {
-      await saveRewards({ data: { inviter: a, invitee: b, dailyLimit: c } });
+      await saveRewards({ data: { inviter: a, invitee: b, dailyLimit: c, recharge: d } });
       await cfg.refetch();
       alert("邀请奖励已保存，立即生效");
     } catch (e: any) {
@@ -1090,7 +1101,8 @@ function InvitesPanel() {
         <div>
           <h2 className="text-base font-bold">邀请拉新</h2>
           <p className="text-xs text-slate-400 mt-1">
-            按邀请人分组统计。每邀请一位新用户注册，邀请人与新用户各自获得解析次数。
+            按邀请人分组统计。每邀请一位新用户注册，邀请人与新用户各自获得解析次数；
+            被邀请的新人<strong className="text-amber-300">首次充值</strong>，再额外奖励邀请人 N 次。
           </p>
         </div>
         <button
@@ -1102,7 +1114,7 @@ function InvitesPanel() {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
         <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
           <p className="text-2xl font-bold text-pink-300">{rows.length}</p>
           <p className="text-[11px] text-slate-400 mt-0.5">有邀请的用户</p>
@@ -1115,8 +1127,12 @@ function InvitesPanel() {
           <p className="text-2xl font-bold text-amber-300">{totalGranted}</p>
           <p className="text-[11px] text-slate-400 mt-0.5">已发放邀请次数</p>
         </div>
+        <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-3">
+          <p className="text-2xl font-bold text-emerald-300">{totalRecharge}</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">首充奖励已发放</p>
+        </div>
         <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
-          <p className="text-2xl font-bold text-emerald-300">{todayInvites}</p>
+          <p className="text-2xl font-bold text-sky-300">{todayInvites}</p>
           <p className="text-[11px] text-slate-400 mt-0.5">今日新增</p>
         </div>
       </div>
@@ -1153,14 +1169,35 @@ function InvitesPanel() {
               className="w-28 px-2 py-1.5 rounded-md bg-slate-800 border border-slate-700 text-slate-100 text-sm"
             />
           </div>
-          <button
-            onClick={onSave}
-            disabled={saving || cfg.isLoading}
-            className="px-3 py-1.5 rounded-md bg-pink-600 hover:bg-pink-500 text-white text-xs font-semibold disabled:opacity-50"
-          >
-            {saving ? "保存中..." : "保存奖励设置"}
-          </button>
+          <div className="ml-auto">
+            <button
+              onClick={onSave}
+              disabled={saving || cfg.isLoading}
+              className="px-3 py-1.5 rounded-md bg-pink-600 hover:bg-pink-500 text-white text-xs font-semibold disabled:opacity-50"
+            >
+              {saving ? "保存中..." : "保存奖励设置"}
+            </button>
+          </div>
         </div>
+
+        <div className="mt-3 rounded-lg border-2 border-amber-500/50 bg-gradient-to-r from-amber-500/15 to-rose-500/10 p-3 flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-sm font-bold text-amber-200 mb-1">
+              新人首次充值，奖励邀请人（次）
+            </label>
+            <input
+              type="number"
+              min={0}
+              value={rechargeReward}
+              onChange={(e) => setRechargeReward(e.target.value === "" ? "" : Number(e.target.value))}
+              className="w-32 px-3 py-2 rounded-md bg-slate-900 border-2 border-amber-500/60 text-amber-200 text-xl font-bold text-center"
+            />
+          </div>
+          <p className="text-[11px] leading-relaxed text-amber-100/70 max-w-md">
+            被邀请人<strong className="text-amber-300">第一次充值成功</strong>时，给邀请人额外加这个次数；同一邀请只发一次，填 0 等于关闭。
+          </p>
+        </div>
+
         <p className="text-[11px] text-slate-500 mt-2">
           超出每日上限的邀请仍会记录关系（后台可见），但不再给邀请人发次数，防止刷号。
         </p>
@@ -1178,7 +1215,8 @@ function InvitesPanel() {
                 <th className="text-left px-3 py-2">邀请人（谁拉的）</th>
                 <th className="text-left px-3 py-2">邀请码</th>
                 <th className="text-left px-3 py-2">邀请人数</th>
-                <th className="text-left px-3 py-2">获得次数</th>
+                <th className="text-left px-3 py-2">邀请奖励</th>
+                <th className="text-left px-3 py-2">首充奖励</th>
                 <th className="text-left px-3 py-2">最近邀请</th>
                 <th className="text-left px-3 py-2">操作</th>
               </tr>
@@ -1200,6 +1238,12 @@ function InvitesPanel() {
                     <td className="px-3 py-2 font-mono text-xs text-slate-300">{r.invite_code || "—"}</td>
                     <td className="px-3 py-2 text-slate-200 font-semibold">{r.invitee_count}</td>
                     <td className="px-3 py-2 text-amber-300">{r.credits_granted}</td>
+                    <td className="px-3 py-2">
+                      <span className={r.recharge_credits ? "text-emerald-300 font-semibold" : "text-slate-500"}>
+                        {r.recharge_credits || 0}
+                      </span>
+                      <span className="text-[11px] text-slate-500 ml-1">（{r.recharge_count || 0} 人首充）</span>
+                    </td>
                     <td className="px-3 py-2 text-slate-400 text-xs whitespace-nowrap">
                       {r.last_invited_at ? new Date(r.last_invited_at).toLocaleString("zh-CN") : "—"}
                     </td>
@@ -1214,7 +1258,7 @@ function InvitesPanel() {
                   </tr>
                   {expanded === r.inviter_id && (
                     <tr key={r.inviter_id + "-detail"} className="border-t border-slate-800 bg-slate-950/60">
-                      <td colSpan={6} className="px-3 py-2">
+                      <td colSpan={7} className="px-3 py-2">
                         <div className="text-[11px] text-slate-400 mb-1.5">被邀请人明细</div>
                         <div className="space-y-1">
                           {(r.invitees || []).map((i, idx) => (
@@ -1225,6 +1269,9 @@ function InvitesPanel() {
                               </span>
                               <span className="text-amber-300 whitespace-nowrap">
                                 邀请人 +{i.inviter_credits} / 新人 +{i.invitee_credits}
+                              </span>
+                              <span className={`whitespace-nowrap ${i.first_recharge_credits ? "text-emerald-300" : "text-slate-600"}`}>
+                                {i.first_recharge_credits ? `首充 +${i.first_recharge_credits}` : "未首充"}
                               </span>
                             </div>
                           ))}
@@ -1237,7 +1284,7 @@ function InvitesPanel() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="text-center text-slate-500 py-8">还没有任何邀请记录</td>
+                  <td colSpan={7} className="text-center text-slate-500 py-8">还没有任何邀请记录</td>
                 </tr>
               )}
             </tbody>

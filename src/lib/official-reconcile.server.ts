@@ -38,6 +38,9 @@ export async function markOfficialOrderPaid(orderNo: string, tradeId: string) {
     _user_id: updated[0].user_id,
     _delta: updated[0].credits,
   });
+  // 拉新加码：被邀请人首次充值，额外奖励邀请人（失败不影响到账）
+  const { grantInviteRechargeBonus } = await import("@/lib/invite-bonus.server");
+  await grantInviteRechargeBonus(updated[0].user_id);
   console.log("[official-reconcile] order paid", { orderNo, tradeId });
   return true;
 }

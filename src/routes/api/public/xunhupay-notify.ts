@@ -78,6 +78,10 @@ export const Route = createFileRoute("/api/public/xunhupay-notify")({
             _delta: order.credits,
           });
 
+          // 拉新加码：被邀请人首次充值，额外奖励邀请人（失败不影响到账）
+          const { grantInviteRechargeBonus } = await import("@/lib/invite-bonus.server");
+          await grantInviteRechargeBonus(order.user_id);
+
           return new Response("success");
         } catch (e: any) {
           console.error("[xunhupay-notify] error", e);
