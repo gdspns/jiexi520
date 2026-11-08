@@ -11,6 +11,24 @@ export const Route = createFileRoute("/auth")({
 type Mode = "login" | "signup";
 type SignupStep = "email" | "code" | "password";
 
+// 注册仅开放腾讯 / 网易 163 / 新浪邮箱，挡掉临时邮箱与垃圾注册。
+// 服务端还有一层 Before User Created Hook（数据库函数）做硬校验，这里只负责提前给提示。
+const ALLOWED_EMAIL_DOMAINS = [
+  "qq.com",
+  "foxmail.com",
+  "vip.qq.com",
+  "163.com",
+  "126.com",
+  "sina.com",
+  "sina.cn",
+  "vip.sina.com",
+];
+
+function isAllowedEmail(email: string) {
+  const domain = email.split("@")[1]?.trim().toLowerCase() || "";
+  return ALLOWED_EMAIL_DOMAINS.includes(domain);
+}
+
 function AuthPage() {
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
@@ -51,23 +69,29 @@ function AuthPage() {
   const sendCode = async () => {
     setErr(null);
     setMsg(null);
-    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
+    const addr = email.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(addr)) {
       setErr("请输入正确的邮箱地址");
+      return;
+    }
+    if (!isAllowedEmail(addr)) {
+      setErr("仅支持 QQ 邮箱、163 邮箱、新浪邮箱注册，请更换邮箱后再试");
       return;
     }
     setLoading(true);
     try {
       const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
+        email: addr,
         options: { shouldCreateUser: true },
       });
       if (error) throw error;
       setStep("code");
       setCooldown(60);
-      setMsg(`验证码已发送到 ${email.trim()}，请查收（含垃圾箱），10 分钟内有效。`);
+      setMsg(`验证码已发送到 ${addr}，请查收（含垃圾箱），10 分钟内有效。`);
     } catch (e: any) {
       const text = String(e?.message || "");
-      if (/rate limit|too many/i.test(text)) setErr("发送太频繁，请稍后再试（同一邮箱 60 秒内只能发一次）");
+      if (/仅支持/.test(text)) setErr(text);
+      else if (/rate limit|too many/i.test(text)) setErr("发送太频繁，请稍后再试（同一邮箱 60 秒内只能发一次）");
       else if (/smtp|email.*not.*configured/i.test(text)) setErr("邮件服务未配置，请联系管理员配置发信 SMTP");
       else setErr(text || "验证码发送失败，请稍后重试");
     } finally {
@@ -223,8 +247,15 @@ function AuthPage() {
               onChange={(e) => setEmail(e.target.value)}
               disabled={isSignup && step !== "email"}
               className="mt-1 w-full px-4 py-3 rounded-lg bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-pink-500 disabled:opacity-60"
-              placeholder="you@example.com"
+              placeholder={isSignup ? "QQ / 163 / 新浪 邮箱" : "you@example.com"}
             />
+            {isSignup && (
+              <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+                仅支持 <span className="text-slate-300">QQ 邮箱（qq.com / foxmail.com）</span>、
+                <span className="text-slate-300">163 邮箱</span>、
+                <span className="text-slate-300">新浪邮箱</span>，临时邮箱无法注册
+              </p>
+            )}
           </div>
 
           {/* 验证码步骤 */}
