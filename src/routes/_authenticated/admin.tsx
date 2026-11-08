@@ -352,7 +352,7 @@ function AdminPage() {
     }`;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex">
+    <div className="notranslate min-h-screen bg-slate-950 text-slate-100 flex" translate="no">
       {/* Sidebar */}
       <aside className="w-56 border-r border-slate-800 bg-slate-900/60 flex flex-col shrink-0">
         <div className="px-4 py-5 border-b border-slate-800">
