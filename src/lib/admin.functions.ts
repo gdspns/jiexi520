@@ -74,7 +74,20 @@ export const deleteUser = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
     await assertAdmin(supabase, userId);
     if (data.userId === userId) throw new Error("不能删除自己");
-    throw new Error("当前部署未配置私密管理密钥，不能删除登录账号；请先使用封禁功能");
+    // 数据库函数内部校验管理员身份，并删除 auth.users 与关联业务数据
+    const { error } = await (supabase as any).rpc("admin_delete_user", {
+      target_user_id: data.userId,
+    });
+    if (!error) return { ok: true };
+    // 兜底：数据库函数不可用时改用服务端密钥的 auth.admin 接口删除
+    try {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { error: adminError } = await supabaseAdmin.auth.admin.deleteUser(data.userId);
+      if (adminError) throw new Error(adminError.message);
+      return { ok: true };
+    } catch (e: any) {
+      throw new Error(String(error.message || e?.message || "删除失败，请稍后重试"));
+    }
   });
 
 export const adjustCredits = createServerFn({ method: "POST" })
