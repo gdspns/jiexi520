@@ -223,7 +223,9 @@ async function handle(request: Request): Promise<Response> {
     sliced.set("content-length", String(length));
     sliced.set("content-range", `bytes ${start}-${end}/${upstreamTotal}`);
     sliced.set("accept-ranges", "bytes");
-    sliced.set("Cache-Control", "no-store");
+    // 允许浏览器缓存已下载的分片：手机上每次 seek 都重新下一遍，
+    // 移动网络根本追不上，表现就是「拖着拖着就卡死」。
+    sliced.set("Cache-Control", "public, max-age=600");
     if (shouldDownload) sliced.set("Content-Disposition", attachmentName(filename, "download"));
     return new Response(sliceStream(upstream.body, start, end), {
       status: 206,
@@ -241,9 +243,9 @@ async function handle(request: Request): Promise<Response> {
     respHeaders.set("Content-Disposition", attachmentName(filename, "download"));
     respHeaders.set("Cache-Control", "no-store");
   } else {
-    // 不缓存：直链本身有时效，缓存半截 206 分片会让播放器拿到不完整数据，
-    // 表现就是"播一会儿卡住、刷新也放不出来"。
-    respHeaders.set("Cache-Control", "no-store");
+    // 播放走浏览器缓存：每次 seek 都从 0 重下，在移动网络上必然卡死。
+    // URL 里已经带了完整的 CDN 直链，直链一变 URL 就变，不会读到脏数据。
+    respHeaders.set("Cache-Control", "public, max-age=600");
   }
 
   return new Response(upstream.body, {

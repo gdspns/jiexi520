@@ -652,7 +652,7 @@
                     <div class="flex flex-col sm:flex-row gap-6 items-start sm:items-center bg-slate-900/50 rounded-2xl p-4 border border-slate-700/50">
                         <div class="result-media-wrap w-full sm:w-36 h-36 bg-slate-800 rounded-xl overflow-hidden relative flex-shrink-0 group ring-1 ring-white/10">
                             <img id="video-thumbnail" src="" alt="封面" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110">
-                            <video id="mobile-result-video" class="hidden" playsinline webkit-playsinline preload="metadata" referrerpolicy="no-referrer"></video>
+                            <video id="mobile-result-video" class="hidden" playsinline webkit-playsinline preload="auto" referrerpolicy="no-referrer"></video>
                             <div id="mobile-video-state" class="mobile-video-state hidden">
                                 <div id="mobile-video-spinner" class="mobile-video-spinner"></div>
                                 <span id="mobile-video-status">视频加载中…</span>
@@ -1209,6 +1209,35 @@
             return refreshInFlight;
         }
 
+        // 页面被刷新 / 微信返回时，解析结果会整个丢掉，直链也早就过期，
+        // 用户只能再花一次积分重解析。这里把结果和票据暂存到 sessionStorage，
+        // 刷新后自动恢复并静默换一条新直链。
+        const LAST_RESULT_KEY = 'jiexi:last-result';
+        function rememberLastResult(shareUrl, data) {
+            try {
+                sessionStorage.setItem(LAST_RESULT_KEY, JSON.stringify({ shareUrl, data, at: Date.now() }));
+            } catch (e) {}
+        }
+
+        async function restoreLastResult() {
+            let saved = null;
+            try { saved = JSON.parse(sessionStorage.getItem(LAST_RESULT_KEY) || 'null'); } catch (e) {}
+            if (!saved || !saved.data || !saved.data.video_url) return;
+            if (Date.now() - Number(saved.at || 0) > 6 * 3600 * 1000) return;
+            const input = document.getElementById('url-input');
+            const container = document.getElementById('result-container');
+            if (!container || !container.classList.contains('hidden')) return;
+            if (input && input.value.trim()) return;
+            currentShareUrl = saved.shareUrl || saved.data.original_url || '';
+            currentSingleData = saved.data;
+            const fresh = await refreshVideoUrl();
+            if (fresh) currentSingleData.video_url = fresh;
+            if (currentSingleData === saved.data && container.classList.contains('hidden')) {
+                if (input) { input.value = currentShareUrl; input.dispatchEvent(new Event('input')); }
+                renderSingleResult(currentSingleData, { silent: true });
+            }
+        }
+
         // --- 新增强化：更适合二进制流传输的高级 CORS 代理 ---
         async function smartFetch(url, onProgress) {
             // 走自家后端媒体代理，由 Worker 携带正确的 Referer/UA 抓取，绕开防盗链和 CORS
@@ -1438,11 +1467,24 @@
             const contentRange = probe.response.headers.get('Content-Range') || '';
             const total = Number(contentRange.split('/')[1] || probe.response.headers.get('Content-Length') || 0);
 
+            // 超过 memLimit 就不再读进内存：手机上这么干会被系统直接杀掉页面。
+            const memLimit = Number(options.maxBytes || 0);
+            if (memLimit && total > memLimit) {
+                const err = new Error('视频较大，已改用不占内存的保存方式');
+                err.code = 'TOO_LARGE';
+                throw err;
+            }
+
             // 源站不支持分段：只能整包流式读取
             if (probe.response.status !== 206 || !total) {
                 const response = await fetch(src, { cache: 'no-store', signal });
                 if (!response.ok) throw new Error('视频读取失败（' + response.status + '）');
                 const length = Number(response.headers.get('Content-Length') || 0);
+                if (memLimit && length > memLimit) {
+                    const err = new Error('视频较大，已改用不占内存的保存方式');
+                    err.code = 'TOO_LARGE';
+                    throw err;
+                }
                 const reader = response.body.getReader();
                 const chunks = [];
                 let received = 0;
@@ -1451,6 +1493,13 @@
                     if (done) break;
                     chunks.push(value);
                     received += value.length;
+                    // 边读边卡上限：大小未知的大文件也不会把内存吃爆
+                    if (memLimit && received > memLimit) {
+                        try { await reader.cancel(); } catch (e) {}
+                        const err = new Error('视频较大，已改用不占内存的保存方式');
+                        err.code = 'TOO_LARGE';
+                        throw err;
+                    }
                     onProgress(length ? (received / length) * 100 : null, received);
                 }
                 return new Blob(chunks, { type: 'video/mp4' });
@@ -1481,6 +1530,20 @@
             return new Blob(parts, { type: 'video/mp4' });
         }
 
+        // 手机端保存视频：最核心的原则是「不要把视频读进 JS 内存」。
+        // iOS Safari 给单个标签页的内存上限只有几百 MB，把 30MB 以上的视频
+        // 拼成 Blob 再 new File 分享，系统会直接杀掉页面 —— 这就是「保存读到
+        // 一半就停、然后失败」。所以：
+        //   小文件（≤16MB）→ 读取后走系统分享，可一键存相册；
+        //   大文件 → 一律交给系统下载管理器 / 原生播放器流式处理，零内存占用。
+        const MOBILE_SHARE_LIMIT = 16 * 1024 * 1024;
+
+        function formatSize(bytes) {
+            if (!bytes || !isFinite(bytes)) return '';
+            if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+            return Math.max(1, Math.round(bytes / 1024)) + ' KB';
+        }
+
         async function promptMobileVideoSave(url, fileName) {
             const ua = navigator.userAgent || '';
             const isIOS = /iPhone|iPad|iPod/i.test(ua);
@@ -1497,19 +1560,17 @@
             overlay.innerHTML = `
                 <div class="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl text-center">
                     <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-500/20 text-blue-300"><i class="fa-solid fa-video"></i></div>
-                    <h3 class="text-lg font-bold text-white mb-2">保存视频</h3>
-                    <p class="save-tip text-sm text-slate-300 mb-4">${isIOS ? 'iPhone 请点“存入相册”，在系统菜单里选择“存储视频”。' : '点“立即下载”即可保存，视频较大时请在下载列表查看进度。'}</p>
+                    <h3 class="text-lg font-bold text-white mb-1">保存视频</h3>
+                    <p class="save-size text-xs text-slate-500 mb-3"></p>
+                    <p class="save-tip text-sm text-slate-300 mb-4">正在读取视频信息…</p>
                     <div class="save-progress-wrap hidden mb-4">
                         <div class="h-2 overflow-hidden rounded-full bg-slate-800 mb-2"><div class="save-progress h-full w-0 bg-gradient-to-r from-blue-500 to-indigo-500 transition-all"></div></div>
                         <p class="save-status text-xs text-slate-400">正在读取视频…</p>
                     </div>
                     <div class="space-y-2">
-                        ${isIOS
-                            ? `<button type="button" class="save-share w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white">存入相册</button>
-                               <a class="save-direct block w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100" href="${downloadHref}" download="${finalName}">直接下载到“文件”</a>`
-                            : `<a class="save-direct block w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white" href="${downloadHref}" download="${finalName}">立即下载</a>
-                               <button type="button" class="save-share w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100">分享到相册</button>`}
-                        <a class="block w-full py-2 text-sm text-blue-300" href="${playHref}" target="_blank" rel="noopener">在浏览器播放（可长按保存）</a>
+                        <button type="button" class="save-share w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white">存入相册</button>
+                        <a class="save-direct block w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100" href="${downloadHref}" download="${finalName}">下载视频文件</a>
+                        <a class="save-play block w-full py-2 text-sm text-blue-300" href="${playHref}" target="_blank" rel="noopener">在浏览器打开视频</a>
                         <button type="button" class="save-close w-full py-2 text-sm text-slate-500">关闭</button>
                     </div>
                 </div>`;
@@ -1518,8 +1579,11 @@
             const progressWrap = overlay.querySelector('.save-progress-wrap');
             const progressBar = overlay.querySelector('.save-progress');
             const statusEl = overlay.querySelector('.save-status');
+            const tipEl = overlay.querySelector('.save-tip');
+            const sizeEl = overlay.querySelector('.save-size');
             const shareBtn = overlay.querySelector('.save-share');
             const directLink = overlay.querySelector('.save-direct');
+            const playLink = overlay.querySelector('.save-play');
             const openedAt = Date.now();
 
             const close = () => {
@@ -1530,21 +1594,54 @@
             overlay.querySelector('.save-close').addEventListener('click', close);
             overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
 
-            // 弹窗停留超过 90 秒后，原直链很可能已经过期：点击下载前先换一条新链，
-            // 否则浏览器下载管理器会拿到 410 直接失败。
-            if (directLink) {
-                directLink.addEventListener('click', async (event) => {
-                    if (Date.now() - openedAt < 90000) return;
-                    event.preventDefault();
-                    const original = directLink.innerHTML;
-                    directLink.innerHTML = '正在获取新链接…';
-                    const fresh = await refreshVideoUrl();
-                    const href = toDownloadUrl(fresh || url, finalName);
-                    directLink.setAttribute('href', href);
-                    directLink.innerHTML = original;
-                    window.location.href = href;
-                });
+            // 量一下文件大小：只读 1 个字节，几乎不耗流量
+            let totalBytes = 0;
+            try {
+                const probe = await fetchRangeBuffer(proxifyVideo(url), 0, 0, null, 12000);
+                const cr = probe.response.headers.get('Content-Range') || '';
+                totalBytes = Number(cr.split('/')[1] || probe.response.headers.get('Content-Length') || 0) || 0;
+            } catch (e) {}
+            if (!overlay.isConnected) return;
+            sizeEl.textContent = totalBytes ? '视频大小 ' + formatSize(totalBytes) : '';
+
+            const canShareFile = !!(navigator.canShare && window.File);
+            // 量不到大小也先给「存入相册」：真正读取时 fetchMediaBlob 会按
+            // MOBILE_SHARE_LIMIT 卡住，超了自动抛 TOO_LARGE 切到不占内存的方案。
+            const shareMode = canShareFile && (totalBytes === 0 || totalBytes <= MOBILE_SHARE_LIMIT);
+
+            if (shareMode) {
+                tipEl.textContent = isIOS
+                    ? '点“存入相册”，在系统菜单里选“存储视频”。'
+                    : '点“存入相册”，在系统菜单里选择保存位置。';
+                shareBtn.style.display = 'block';
+            } else {
+                tipEl.textContent = isIOS
+                    ? '这个视频较大，直接点“在浏览器打开视频”，再点右下角分享 → 存储视频（不占内存，最稳）。'
+                    : '点“下载视频文件”即可保存，进度在通知栏或浏览器下载列表查看。';
+                shareBtn.style.display = 'none';
+                if (isIOS) playLink.className = 'save-play block w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white';
             }
+
+            // 弹窗停留过久，原直链多半已过期：点下载前先换一条新链，
+            // 否则系统下载器会直接拿到 410。
+            let hrefFresh = false;
+            const refreshHref = async () => {
+                if (hrefFresh) return;
+                const fresh = await refreshVideoUrl();
+                if (!fresh) return;
+                hrefFresh = true;
+                directLink.setAttribute('href', toDownloadUrl(fresh, finalName));
+                playLink.setAttribute('href', proxifyVideo(fresh));
+            };
+            directLink.addEventListener('click', async (event) => {
+                if (Date.now() - openedAt < 60000 || hrefFresh) return;
+                event.preventDefault();
+                const original = directLink.innerHTML;
+                directLink.innerHTML = '正在获取新链接…';
+                await refreshHref();
+                directLink.innerHTML = original;
+                directLink.click();
+            });
 
             if (shareBtn) {
                 shareBtn.addEventListener('click', async () => {
@@ -1562,7 +1659,7 @@
                                 progressBar.style.width = `${Math.min(100, percent)}%`;
                                 statusEl.textContent = `正在读取视频 ${Math.round(percent)}%`;
                             }
-                        }, activeController.signal, { refresh: refreshVideoUrl });
+                        }, activeController.signal, { refresh: refreshVideoUrl, maxBytes: MOBILE_SHARE_LIMIT });
                         const file = new File([blob], finalName, { type: 'video/mp4' });
                         if (navigator.canShare && navigator.canShare({ files: [file] })) {
                             await navigator.share({ files: [file], title: finalName });
@@ -1570,21 +1667,18 @@
                             close();
                             return;
                         }
-                        const blobUrl = URL.createObjectURL(file);
-                        const a = document.createElement('a');
-                        a.href = blobUrl;
-                        a.download = finalName;
-                        document.body.appendChild(a);
-                        a.click();
-                        a.remove();
-                        setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
-                        showToast('已开始下载，请到“文件”或“下载”中查看', 'success');
-                        close();
+                        throw new Error('当前浏览器不支持直接分享');
                     } catch (error) {
                         if (error?.name === 'AbortError') { statusEl.textContent = '已取消'; return; }
                         progressWrap.classList.add('hidden');
-                        overlay.querySelector('.save-tip').textContent = '读取失败，请改用“直接下载”，或点下方在浏览器播放后长按保存。';
-                        showToast(error?.message || '读取失败，请改用直接下载', 'error');
+                        if (error?.code === 'TOO_LARGE') {
+                            tipEl.textContent = '视频较大，已切换到不占内存的方式：请点“下载视频文件”或“在浏览器打开视频”。';
+                            shareBtn.style.display = 'none';
+                            if (isIOS) playLink.className = 'save-play block w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white';
+                        } else {
+                            tipEl.textContent = '读取失败，请改用“下载视频文件”，或点“在浏览器打开视频”后长按保存。';
+                        }
+                        showToast(error?.message || '读取失败，请改用下载按钮', 'error');
                     } finally {
                         shareBtn.dataset.busy = '0';
                         shareBtn.disabled = false;
@@ -1592,11 +1686,9 @@
                 });
             }
 
-            if (directLink) {
-                directLink.addEventListener('click', () => {
-                    showToast(isIOS ? '已开始下载，请到“文件”App 查看' : '已开始下载，请在通知栏或下载列表查看进度', 'success');
-                });
-            }
+            directLink.addEventListener('click', () => {
+                showToast(isIOS ? '已开始下载，请到“文件”App 查看' : '已开始下载，请在通知栏或下载列表查看进度', 'success');
+            });
         }
 
         async function saveMobileImages(images, indexes = null) {
@@ -1871,6 +1963,7 @@
             try {
                 currentShareUrl = urls[0];
                 currentSingleData = await fetchVideoDataAPI(urls[0]);
+                rememberLastResult(currentShareUrl, currentSingleData);
                 renderSingleResult(currentSingleData);
             } catch (err) {
                 showToast(err.message, 'error');
@@ -1882,10 +1975,14 @@
             }
         });
 
-        function renderSingleResult(data) {
+        function renderSingleResult(data, opts = {}) {
             document.getElementById('video-title').textContent = data.title;
             document.getElementById('video-thumbnail').src = data.cover;
             document.getElementById('platform-name').textContent = data.platform;
+            // 这两个按钮在函数后面才用到，必须先声明：
+            // 之前声明在 if 块后面，事件回调里访问会踩 TDZ，手机端偶发"点了没反应"。
+            const watchBtn = document.getElementById('watch-video-btn');
+            const dlVideoBtn = document.getElementById('download-video-btn');
             const mobileVideo = document.getElementById('mobile-result-video');
             const thumbnail = document.getElementById('video-thumbnail');
             const videoState = document.getElementById('mobile-video-state');
@@ -1908,56 +2005,91 @@
                 videoStatus.textContent = '视频加载中…';
                 videoStatus.style.display = 'block';
                 videoReady.style.display = 'none';
+                // 手机端必须让浏览器自己多缓冲：只预载元数据时几乎没有余量，
+                // 移动网络一抖动就断流，表现就是「播一会儿就卡住」。
+                mobileVideo.preload = 'auto';
                 const markVideoReady = () => {
                     videoSpinner.style.display = 'none';
+                    if (!mobileVideo.paused && mobileVideo.readyState >= 2) {
+                        videoState.classList.add('hidden');
+                        return;
+                    }
                     videoStatus.style.display = 'none';
                     videoReady.style.display = 'flex';
-                    watchBtn.style.display = 'flex';
+                };
+                const showStatus = (text) => {
+                    videoState.classList.remove('hidden');
+                    videoSpinner.style.display = 'none';
+                    videoStatus.style.display = 'block';
+                    videoStatus.textContent = text;
+                    videoReady.style.display = 'flex';
                 };
 
-                // 卡顿看门狗：播放中 9 秒没有任何进展，判定直链过期或被限速，
-                // 自动换一条新直链并从当前进度续播，用户不需要刷新页面。
+                // ---- 手机端卡顿恢复 ----
+                // 换 src 等于清空全部已缓冲数据。移动网络一次几秒抖动就被判定成
+                // 「直链失效」去换源重来，只会把抖动放大成永远播不完。
+                // 所以顺序改成：先等 → 就地续播 → 最后才换直链，且换完等用户点一下
+                // （iOS/安卓会拒绝非用户手势的自动播放，那就是「卡住不动」）。
                 let stallTimer = null;
-                let recovering = false;
-                const clearStall = () => { if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } };
-                const resumeAt = (at, autoplay) => {
-                    mobileVideo.onloadedmetadata = () => {
-                        try { if (at > 0.5) mobileVideo.currentTime = at; } catch (e) {}
-                        if (autoplay) mobileVideo.play().catch(() => {});
-                    };
-                };
-                const recoverPlayback = async () => {
-                    if (recovering) return;
-                    recovering = true;
-                    const at = mobileVideo.currentTime || 0;
-                    const wasPlaying = !mobileVideo.paused;
-                    videoState.classList.remove('hidden');
-                    videoSpinner.style.display = 'block';
-                    videoStatus.style.display = 'block';
-                    videoStatus.textContent = '正在恢复播放…';
-                    const fresh = await refreshVideoUrl();
-                    if (fresh) {
-                        playSources[0] = proxifyVideo(fresh);
-                        mobileVideo.dataset.stage = '0';
-                        mobileVideo.dataset.refreshed = '0';
-                        resumeAt(at, wasPlaying);
-                        mobileVideo.src = playSources[0];
-                        mobileVideo.load();
-                        videoSpinner.style.display = 'none';
-                        videoStatus.style.display = 'none';
-                        videoState.classList.add('hidden');
-                    } else {
-                        videoSpinner.style.display = 'none';
-                        videoStatus.style.display = 'block';
-                        videoStatus.textContent = '视频链接已失效，请重新解析';
-                        videoReady.style.display = 'flex';
-                    }
-                    recovering = false;
+                let lastProgressAt = Date.now();
+                const clearStall = () => {
+                    lastProgressAt = Date.now();
+                    if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
                 };
                 const armStall = () => {
                     if (mobileVideo.paused || mobileVideo.ended) return;
-                    clearStall();
-                    stallTimer = setTimeout(recoverPlayback, 9000);
+                    if (stallTimer) return;
+                    stallTimer = setTimeout(async () => {
+                        stallTimer = null;
+                        if (mobileVideo.paused || mobileVideo.ended) return;
+                        // 还有可播数据，只是慢：继续等，千万别动 src
+                        if (mobileVideo.readyState >= 3) { armStall(); return; }
+                        try {
+                            await mobileVideo.play();
+                            armStall();
+                            return;
+                        } catch (e) {}
+                        showStatus('网络较慢，点这里继续播放');
+                    }, 20000);
+                };
+                // 用户点播放/继续播放：在用户手势里完成「换新直链 + 定位续播」
+                const resumeFromGesture = async () => {
+                    const at = mobileVideo.currentTime || 0;
+                    videoState.classList.add('hidden');
+                    videoStatus.style.display = 'none';
+                    videoReady.style.display = 'none';
+                    mobileVideo.controls = true;
+                    if (Date.now() - lastProgressAt > 25000) {
+                        videoStatus.style.display = 'block';
+                        videoStatus.textContent = '正在获取新链接…';
+                        videoState.classList.remove('hidden');
+                        const fresh = await refreshVideoUrl();
+                        if (fresh) {
+                            playSources[0] = proxifyVideo(fresh);
+                            mobileVideo.dataset.stage = '0';
+                            mobileVideo.dataset.refreshed = '0';
+                            await new Promise((resolve) => {
+                                const done = () => {
+                                    mobileVideo.removeEventListener('loadedmetadata', done);
+                                    resolve();
+                                };
+                                mobileVideo.addEventListener('loadedmetadata', done);
+                                mobileVideo.src = playSources[0];
+                                mobileVideo.load();
+                                setTimeout(done, 8000);
+                            });
+                            try { if (at > 0.5) mobileVideo.currentTime = at; } catch (e) {}
+                        }
+                        videoStatus.style.display = 'none';
+                        videoState.classList.add('hidden');
+                    }
+                    try {
+                        await mobileVideo.play();
+                        clearStall();
+                        videoState.classList.add('hidden');
+                    } catch (e) {
+                        showStatus('播放失败，请重新解析');
+                    }
                 };
 
                 mobileVideo.oncanplay = markVideoReady;
@@ -1969,54 +2101,35 @@
                 mobileVideo.onstalled = armStall;
                 mobileVideo.onseeking = clearStall;
                 mobileVideo.ontimeupdate = clearStall;
-                mobileVideo.onerror = async () => {
-                    // 直链过期多半表现为媒体解码错误，先静默换一条新直链重试，
-                    // 再退到 ffmpeg 转码，最后才提示失败。
-                    if (mobileVideo.dataset.refreshed === '0') {
-                        mobileVideo.dataset.refreshed = '1';
-                        const at = mobileVideo.currentTime || 0;
-                        const wasPlaying = !mobileVideo.paused;
-                        const fresh = await refreshVideoUrl();
-                        if (fresh) {
-                            playSources[0] = proxifyVideo(fresh);
-                            mobileVideo.dataset.stage = '0';
-                            resumeAt(at, wasPlaying);
-                            mobileVideo.src = playSources[0];
-                            mobileVideo.load();
-                            return;
-                        }
-                    }
+                mobileVideo.onerror = () => {
+                    // 真报错才动 src；换完也要等用户点一下，不再自动换源清缓冲
                     const stage = Number(mobileVideo.dataset.stage || 0);
+                    if (stage === 0 && mobileVideo.dataset.refreshed === '0') {
+                        mobileVideo.dataset.refreshed = '1';
+                        showStatus('链接已过期，正在更新…');
+                        videoReady.style.display = 'none';
+                        refreshVideoUrl().then((fresh) => {
+                            if (!fresh) { showStatus('视频加载失败，请重新解析'); return; }
+                            playSources[0] = proxifyVideo(fresh);
+                            showStatus('链接已更新，点这里继续播放');
+                            videoReady.style.display = 'flex';
+                        });
+                        return;
+                    }
                     if (stage + 1 < playSources.length) {
                         mobileVideo.dataset.stage = String(stage + 1);
-                        videoState.classList.remove('hidden');
-                        videoSpinner.style.display = 'block';
+                        showStatus('正在转换为兼容格式…');
                         videoReady.style.display = 'none';
-                        videoStatus.style.display = 'block';
-                        videoStatus.textContent = '正在转换为兼容格式…';
                         mobileVideo.src = playSources[stage + 1];
                         mobileVideo.load();
                         return;
                     }
-                    videoSpinner.style.display = 'none';
-                    videoReady.style.display = 'none';
-                    videoStatus.style.display = 'block';
-                    videoStatus.textContent = data.video_url.startsWith('/api/public/media-stream')
+                    showStatus(data.video_url.startsWith('/api/public/media-stream')
                         ? '海外视频线路暂时不可用，请稍后重试'
-                        : '视频加载失败，可点下方“保存到相册”下载后观看';
+                        : '视频加载失败，可点下方“保存视频”下载后观看');
+                    videoReady.style.display = 'none';
                 };
-                videoReady.onclick = async () => {
-                    videoState.classList.add('hidden');
-                    mobileVideo.controls = true;
-                    try {
-                        await mobileVideo.play();
-                    } catch {
-                        videoState.classList.remove('hidden');
-                        videoStatus.style.display = 'block';
-                        videoStatus.textContent = '播放失败，请重试';
-                        videoReady.style.display = 'flex';
-                    }
-                };
+                videoReady.onclick = resumeFromGesture;
                 mobileVideo.src = playSources[0];
                 mobileVideo.classList.add('is-ready-source');
                 mobileVideo.style.display = 'block';
@@ -2032,8 +2145,6 @@
                 thumbnail.style.display = 'block';
             }
             
-            const watchBtn = document.getElementById('watch-video-btn');
-            const dlVideoBtn = document.getElementById('download-video-btn');
             const dlAudioBtn = document.getElementById('download-btn');
             const audioBox = document.getElementById('single-audio-box');
             if (data.video_url) {
@@ -2060,7 +2171,7 @@
             
             document.getElementById('result-container').classList.remove('hidden');
             document.getElementById('result-container').classList.add('animate-fade-in-up');
-            showToast('解析成功，您可以试听或直接点击下载', 'success');
+            if (!opts.silent) showToast('解析成功，您可以试听或直接点击下载', 'success');
         }
 
         // 调用重构后的 downloadMedia
@@ -2630,6 +2741,8 @@
       sb.auth.getSession().then(({ data }) => {
         currentUser = data.session?.user || null;
         renderBar();
+        // 刷新页面后恢复上次的解析结果（内部会先换一条新直链再渲染）
+        try { restoreLastResult(); } catch (e) {}
       });
       sb.auth.onAuthStateChange((event, session) => {
         const newUser = session?.user || null;
