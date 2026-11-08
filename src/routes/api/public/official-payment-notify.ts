@@ -76,6 +76,8 @@ export const Route = createFileRoute("/api/public/official-payment-notify")({
               return Response.json({ code: "FAIL", message: "签名失败" }, { status: 401 });
             }
             const tx = decryptWechatResource(JSON.parse(raw).resource, (cfg as any).official_wechat_api_v3_key || "");
+            // 退款/其他事件不带 out_trade_no，直接确认收到，避免微信持续重推 24 小时
+            if (!tx.out_trade_no) return Response.json({ code: "SUCCESS", message: "成功" });
             if (tx.trade_state !== "SUCCESS" || tx.mchid !== (cfg as any).official_wechat_mch_id || tx.appid !== (cfg as any).official_wechat_app_id) {
               console.error("[official-payment-notify] wechat trade invalid", { orderNo: tx.out_trade_no, state: tx.trade_state });
               return Response.json({ code: "FAIL", message: "交易无效" }, { status: 400 });

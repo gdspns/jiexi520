@@ -716,9 +716,9 @@ function AdminPage() {
                     const diff = Boolean(configured && origin && configured !== origin);
                     return (
                       <div className="mt-2 rounded-lg bg-slate-800/60 border border-slate-700 p-2">
-                        <p className="text-[11px] text-slate-400 mb-1">当前生效的回调地址（可用浏览器直接打开自检）：</p>
-                        <p className="text-[11px] font-mono text-slate-300 break-all">{base}/api/public/official-payment-notify?channel=alipay</p>
-                        <p className="text-[11px] font-mono text-slate-300 break-all mt-1">{base}/api/public/official-payment-notify?channel=wechat</p>
+                        <p className="text-[11px] text-slate-400 mb-1">当前生效的回调地址（支付宝和微信用同一个，可用浏览器直接打开自检）：</p>
+                        <p className="text-[11px] font-mono text-slate-300 break-all">{base}/api/public/official-payment-notify</p>
+                        <p className="text-[11px] text-slate-500 mt-1">⚠ 支付宝/微信都禁止 notify_url 携带参数，所以这里是干净路径；两个渠道由接口按报文体自动识别，不需要你区分。</p>
                         <p className="text-[11px] text-slate-500 mt-2">
                           现在是：{configured ? "固定发往上面这个域名" : `跟随访问域名（当前为 ${origin || "未知"}）`}。
                           {diff ? `注意：你正从 ${origin} 访问，但回调会发往 ${configured}，只要两个域名指向同一个站点就没问题。` : ""}

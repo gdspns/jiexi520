@@ -87,7 +87,9 @@ export const Route = createFileRoute("/api/recharge/create")({
           // 因为 lovable 预览域名 id-preview--*.lovable.app 会强制重定向到登录页，外部回调进不来
           const notifyBase = ((cfgRow as any).notify_base_url || "").replace(/\/+$/, "") || requestOrigin;
           const provider = (channel === "wechat" ? (cfgRow as any).wechat_provider : (cfgRow as any).alipay_provider) === "official" ? "official" : "xunhu";
-          const notifyUrl = provider === "official" ? `${notifyBase}/api/public/official-payment-notify?channel=${channel}` : `${notifyBase}/api/public/xunhupay-notify`;
+          // ⚠ 支付宝/微信都明确规定：notify_url 不能携带任何查询参数（?a=b 这种会被判为非法地址，
+          // 通知可能直接被丢弃）。官方支付两个渠道共用同一个路径，由回调接口按报文特征自动识别。
+          const notifyUrl = provider === "official" ? `${notifyBase}/api/public/official-payment-notify` : `${notifyBase}/api/public/xunhupay-notify`;
           const returnUrl = `${requestOrigin}/?recharge=${orderNo}`;
 
           const clientIp =
