@@ -1105,8 +1105,17 @@
         let currentSingleData = null;
         // 用户最后解析的那个分享链接：直链过期时用它换新直链（不扣积分）
         let currentShareUrl = '';
-        let refreshInFlight = null;
+        // 换链请求按「分享链接 + 票据」区分。之前是一个全局 promise，
+        // 换第二条视频时可能拿到第一条还在飞的结果，把上一条的地址写到新视频上，
+        // 表现就是「解析了第二条，一直转不过来 / 播的还是上一条」。
+        let refreshInFlight = null; // { key, promise }
         let lastRefreshAt = 0;
+        let lastRefreshKey = '';
+        function resetRefreshState() {
+            refreshInFlight = null;
+            lastRefreshAt = 0;
+            lastRefreshKey = '';
+        }
         const isMobileLayout = () => window.matchMedia('(max-width: 640px)').matches;
         let batchResultsData = []; 
 
@@ -1180,13 +1189,19 @@
         // 直链过期（抖音/快手/X 的 CDN 地址带时效，通常几十分钟）后，
         // 用解析时拿到的票据重新解析同一个分享链接换一条新地址。
         // 服务端校验票据签名，所以不会重复扣积分，也不能被拿来白嫖。
-        async function refreshVideoUrl() {
-            if (!currentSingleData || !currentShareUrl || !currentSingleData.refresh_token) return null;
-            if (refreshInFlight) return refreshInFlight;
-            // 3 秒内不重复刷新：既要防止卡顿时把解析接口打爆，
-            // 又不能让"换了链但还是播不动"这种情况被节流误判成彻底失败。
-            if (Date.now() - lastRefreshAt < 3000) return null;
-            refreshInFlight = (async () => {
+        async function refreshVideoUrl(shareUrlOpt, dataOpt) {
+            const shareUrl = shareUrlOpt || currentShareUrl;
+            const holder = dataOpt || currentSingleData;
+            if (!holder || !shareUrl || !holder.refresh_token) return null;
+
+            const key = shareUrl + '|' + holder.refresh_token;
+            if (refreshInFlight && refreshInFlight.key === key) return refreshInFlight.promise;
+            // 同一条链接 3 秒内不重复刷新（防止卡顿时把解析接口打爆）；
+            // 换了链接 key 就变了，必须立刻放行 —— 否则新视频会被上一条的
+            // 节流误判成「链接失效」，用户看到的就是解析完不播放。
+            if (lastRefreshKey === key && Date.now() - lastRefreshAt < 3000) return null;
+
+            const promise = (async () => {
                 try {
                     const sb = window.__sb;
                     const { data: sess } = await sb.auth.getSession();
@@ -1195,22 +1210,30 @@
                     const response = await fetch('/api/parse', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                        body: JSON.stringify({ url: currentShareUrl, refresh_token: currentSingleData.refresh_token }),
+                        body: JSON.stringify({ url: shareUrl, refresh_token: holder.refresh_token }),
                     });
                     const data = await response.json().catch(() => ({}));
                     if (!response.ok || !data.video_url) return null;
-                    currentSingleData.video_url = data.video_url;
-                    if (data.music_url) currentSingleData.music_url = data.music_url;
-                    if (data.refresh_token) currentSingleData.refresh_token = data.refresh_token;
+                    // 请求回来时用户可能已经解析了另一条视频：只有 holder 还是
+                    // 当前这条才写回，绝不把上一条的地址盖到新视频上。
+                    if (holder === currentSingleData) {
+                        holder.video_url = data.video_url;
+                        if (data.music_url) holder.music_url = data.music_url;
+                        if (data.refresh_token) holder.refresh_token = data.refresh_token;
+                    }
                     lastRefreshAt = Date.now();
+                    lastRefreshKey = key;
                     return data.video_url;
                 } catch {
                     return null;
                 } finally {
-                    setTimeout(() => { refreshInFlight = null; }, 2000);
+                    setTimeout(() => {
+                        if (refreshInFlight && refreshInFlight.key === key) refreshInFlight = null;
+                    }, 2000);
                 }
             })();
-            return refreshInFlight;
+            refreshInFlight = { key, promise };
+            return promise;
         }
 
         // 页面被刷新 / 微信返回时，解析结果会整个丢掉，直链也早就过期，
@@ -1234,7 +1257,7 @@
             if (input && input.value.trim()) return;
             currentShareUrl = saved.shareUrl || saved.data.original_url || '';
             currentSingleData = saved.data;
-            const fresh = await refreshVideoUrl();
+            const fresh = await refreshVideoUrl(saved.shareUrl || saved.data.original_url || '', saved.data);
             if (fresh) currentSingleData.video_url = fresh;
             if (currentSingleData === saved.data && container.classList.contains('hidden')) {
                 if (input) { input.value = currentShareUrl; input.dispatchEvent(new Event('input')); }
@@ -1371,13 +1394,41 @@
             let resumeAt = 0, wantPlay = false, busy = false, bound = false;
             let suspended = false, lastAdvanceAt = 0, stallTimer = null, readyMode = 'play';
             let switching = false;
+            // 世代号：每次换视频（mount）或停止都会 +1。
+            // 旧视频的换链/换线路请求是异步的，回来时如果世代号变了必须直接丢弃，
+            // 否则会把「上一条」的新地址写到「下一条」的播放器上 —— 用户看到的就是
+            // 「解析了第二条，却一直转不过来 / 播的还是上一条」。
+            let generation = 0;
+            // UC / 安卓会把 <video> 提升成原生图层，只 display:none 盖不住弹窗，
+            // 临时把元素从 DOM 里摘掉，关闭弹窗时插回原位。
+            let detached = null;
             // 某些 CDN 对浏览器直连统一返回 403（风控），同一个域名失败过就不再重试，
             // 免得每次加载/换链都白跑一趟。
             const brokenHosts = new Set();
             function hostOf(u) { try { return new URL(u).hostname.toLowerCase(); } catch (e) { return ''; } }
 
+            function detachVideo() {
+                if (!video || detached) return;
+                const parent = video.parentNode;
+                if (!parent) return;
+                detached = { parent, next: video.nextSibling };
+                try { parent.removeChild(video); } catch (e) { detached = null; }
+            }
+
+            function reattachVideo() {
+                if (!detached || !video) return;
+                const { parent, next } = detached;
+                detached = null;
+                try {
+                    if (next && next.parentNode === parent) parent.insertBefore(video, next);
+                    else parent.appendChild(video);
+                } catch (e) {
+                    try { parent.appendChild(video); } catch (e2) {}
+                }
+            }
+
             function els() {
-                video = video || document.getElementById('mobile-result-video');
+                video = (video && video.isConnected) ? video : (document.getElementById('mobile-result-video') || video);
                 stateEl = stateEl || document.getElementById('mobile-video-state');
                 spinnerEl = spinnerEl || document.getElementById('mobile-video-spinner');
                 statusEl = statusEl || document.getElementById('mobile-video-status');
@@ -1441,7 +1492,9 @@
                 video.setAttribute('src', src.url);
                 try { video.load(); } catch (e) {}
                 const limit = TIMEOUT[src.kind] || 12000;
+                const gen = generation;
                 loadTimer = setTimeout(() => {
+                    if (gen !== generation) return;
                     if (!video || suspended) return;
                     if (video.readyState >= 1) return;
                     nextSource('timeout:' + src.kind);
@@ -1474,8 +1527,10 @@
             function armStall() {
                 if (!video || suspended || video.paused || video.ended) return;
                 if (stallTimer) return;
+                const gen = generation;
                 stallTimer = setTimeout(async () => {
                     stallTimer = null;
+                    if (gen !== generation) return;
                     if (!video || suspended || video.paused || video.ended) return;
                     if (video.readyState >= 3) { armStall(); return; }
                     try { await video.play(); } catch (e) {}
@@ -1515,11 +1570,16 @@
             async function nextSource(reason) {
                 if (switching) return;
                 switching = true;
+                const gen = generation;
                 try {
                     clearLoadTimer();
                     const at = (video && video.currentTime) || resumeAt || 0;
                     const current = sources[index];
-                    if (current && current.kind === 'proxy' && refreshUsed < 2 && await looksExpired(current.url)) {
+                    const expired = current && current.kind === 'proxy' && refreshUsed < 2
+                        ? await looksExpired(current.url)
+                        : false;
+                    if (gen !== generation) return; // 已经切到别的视频，旧结果直接丢弃
+                    if (expired) {
                         await refresh(at);
                         return;
                     }
@@ -1531,17 +1591,21 @@
                     if (refreshUsed < 2 && typeof refreshVideoUrl === 'function') { await refresh(at); return; }
                     fatal('视频加载失败，点“保存视频”可直接下载观看');
                 } finally {
-                    switching = false;
+                    if (gen === generation) switching = false;
                 }
             }
 
             async function refresh(at) {
                 if (busy) return;
+                const gen = generation;
                 busy = true;
                 refreshUsed += 1;
                 setStatus('链接已过期，正在更新…', { spinner: true });
                 let fresh = null;
                 try { fresh = await refreshVideoUrl(); } catch (e) {}
+                // 换链是网络请求，回来时用户可能已经解析了另一条链接。
+                // 不判断世代号就会把上一条的新地址塞进新播放器 —— 表现为永远转不过来。
+                if (gen !== generation) return;
                 busy = false;
                 if (!fresh) return fatal('视频链接已失效，请重新解析');
                 resumeAt = at || 0;
@@ -1574,12 +1638,14 @@
             function playFromGesture() {
                 els();
                 if (!video) return;
+                const gen = generation;
                 wantPlay = true;
                 hideOverlay();
                 video.controls = true;
                 const p = video.play();
                 if (p && p.catch) {
                     p.catch(() => {
+                        if (gen !== generation) return;
                         video.controls = false;
                         if (index + 1 < sources.length) nextSource('playfail');
                         else if (refreshUsed < 2) refresh(video.currentTime || resumeAt || 0);
@@ -1615,10 +1681,18 @@
             function mount(data) {
                 els();
                 if (!video) return;
+                generation += 1;
                 bindOnce();
+                reattachVideo();
+                // 上一条视频的状态必须彻底清掉：错误、缓冲、poster、进度、
+                // 正在跑的换链请求（靠 generation 丢弃），否则第二条会「转不过来」。
+                try { video.pause(); } catch (e) {}
+                video.removeAttribute('src');
+                try { video.load(); } catch (e) {}
+                video.removeAttribute('data-error');
                 clearLoadTimer(); clearStall();
                 suspended = false;
-                wantPlay = false; resumeAt = 0; index = 0; refreshUsed = 0; busy = false;
+                wantPlay = false; resumeAt = 0; index = 0; refreshUsed = 0; busy = false; switching = false;
                 readyMode = 'play';
                 video.poster = data.cover || '';
                 sources = buildSources(data.video_url);
@@ -1639,6 +1713,10 @@
                 video.classList.remove('is-ready-source');
                 video.style.setProperty('display', 'none', 'important');
                 video.style.setProperty('visibility', 'hidden', 'important');
+                // UC / 安卓的 <video> 是原生图层，display:none 只是不绘制，
+                // 原生层依然浮在 DOM 之上并挡住保存弹窗。必须从 DOM 里摘掉，
+                // 原生层才会真正销毁；关闭弹窗时再插回原位。
+                detachVideo();
                 if (stateEl) stateEl.classList.add('hidden');
                 return snapshot;
             }
@@ -1646,6 +1724,7 @@
             function wake(snapshot) {
                 els();
                 if (!video) return;
+                reattachVideo();
                 suspended = false;
                 video.style.removeProperty('visibility');
                 video.style.removeProperty('display');
@@ -1661,6 +1740,7 @@
             function stop() {
                 els();
                 if (!video) return;
+                generation += 1;
                 suspended = true;
                 clearLoadTimer(); clearStall();
                 try { video.pause(); } catch (e) {}
@@ -1669,6 +1749,7 @@
                 video.controls = false;
                 video.classList.remove('is-ready-source');
                 video.style.setProperty('display', 'none', 'important');
+                reattachVideo();
                 if (stateEl) stateEl.classList.add('hidden');
                 sources = []; index = 0; wantPlay = false; resumeAt = 0;
             }
@@ -1689,12 +1770,31 @@
             MobilePlayback.wake(snapshot);
         }
 
+        // 统一成 .mp4 结尾的文件名
+        function ensureMp4Name(name) {
+            const cleaned = String(name || 'video.mp4').replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 60) || 'video.mp4';
+            return /\.(mp4|m4v|mov)$/i.test(cleaned) ? cleaned : cleaned + '.mp4';
+        }
+
         // 同源下载地址：服务端带 Content-Disposition，交由浏览器下载管理器流式落盘，
         // 安卓上不需要把整个视频读进内存，最稳、也不会卡。
+        //
+        // 关键：路径必须是 /api/public/dl/<名字>.mp4，让 URL 自己就带 .mp4 后缀。
+        // UC / QQ / 百度这些国内浏览器靠后缀判断"这是视频文件"，没有后缀时会
+        // 把链接当网页打开，或者干脆不给下载。服务端仍是流式转发 + attachment。
         function toDownloadUrl(url, fileName) {
-            const src = proxifyVideo(url);
-            const sep = src.includes('?') ? '&' : '?';
-            return src + sep + 'download=1&filename=' + encodeURIComponent(fileName || 'video.mp4');
+            const name = ensureMp4Name(fileName);
+            if (!/^https?:\/\//i.test(String(url || ''))) {
+                // 站内地址（YouTube 走 media-stream）：直接加下载参数
+                const sep = String(url).includes('?') ? '&' : '?';
+                return String(url) + sep + 'download=1&filename=' + encodeURIComponent(name);
+            }
+            // 路径里的名字太长时（中文/emoji 编码后会膨胀）退回 video.mp4，
+            // 真实文件名仍通过 filename 参数交给服务端写 Content-Disposition。
+            const encodedName = encodeURIComponent(name);
+            const pathName = encodedName.length <= 120 ? encodedName : 'video.mp4';
+            return '/api/public/dl/' + pathName + '?url=' + encodeURIComponent(url)
+                + '&filename=' + encodeURIComponent(name);
         }
 
         function fetchWithTimeout(input, init = {}, timeoutMs = 20000) {
@@ -1848,24 +1948,61 @@
             return Math.max(1, Math.round(bytes / 1024)) + ' KB';
         }
 
-        async function promptMobileVideoSave(url, fileName) {
+        // 识别浏览器：不同内核「保存到相册」的路径完全不同，必须分开给指引。
+        function detectMobileBrowser() {
             const ua = navigator.userAgent || '';
-            const isIOS = /iPhone|iPad|iPod/i.test(ua);
-            const safeName = String(fileName || 'video.mp4').replace(/[\\/:*?"<>|]/g, '').slice(0, 100) || 'video.mp4';
-            const finalName = /\.(mp4|mov|m4v)$/i.test(safeName) ? safeName : safeName + '.mp4';
+            const isIOS = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && 'ontouchend' in document);
+            const isAndroid = /Android/i.test(ua);
+            const isWeChat = /MicroMessenger/i.test(ua);
+            const isUC = /UCBrowser|UBrowser|UCWEB/i.test(ua);
+            const isQQ = /MQQBrowser|QQBrowser/i.test(ua);
+            const isQuark = /Quark/i.test(ua);
+            const isBaidu = /baiduboxapp|BIDUBrowser|baidubrowser/i.test(ua);
+            const isSafari = isIOS && /Safari/i.test(ua) && !/CriOS|FxiOS|EdgiOS/i.test(ua) && !isUC && !isQuark && !isQQ && !isWeChat;
+            const isChrome = /Chrome|CriOS/i.test(ua) && !isUC && !isQQ && !isQuark && !isBaidu && !isWeChat;
+            const name = isWeChat ? '微信' : isUC ? 'UC 浏览器' : isQuark ? '夸克' : isQQ ? 'QQ 浏览器'
+                : isBaidu ? '百度浏览器' : isSafari ? 'Safari' : isChrome ? 'Chrome' : isAndroid ? '安卓浏览器' : '浏览器';
+            return { ua, isIOS, isAndroid, isWeChat, isUC, isQQ, isQuark, isBaidu, isSafari, isChrome, name };
+        }
+
+        // 真正探测「能不能把视频文件交给系统分享」。
+        // navigator.canShare 存在不代表支持 files —— 部分套壳浏览器两个都在，
+        // 一调 share 就报错，所以必须用真实的 File 试一次。
+        function supportsFileShare() {
+            try {
+                if (!navigator.share || !navigator.canShare || !window.File) return false;
+                const probe = new File([new Uint8Array([0])], 'probe.mp4', { type: 'video/mp4' });
+                return navigator.canShare({ files: [probe] });
+            } catch (e) {
+                return false;
+            }
+        }
+
+        async function promptMobileVideoSave(url, fileName) {
+            const env = detectMobileBrowser();
+            const finalName = ensureMp4Name(fileName);
             const downloadHref = toDownloadUrl(url, finalName);
             const playHref = proxifyVideo(url);
 
+            // 弹窗前先把 <video> 从 DOM 里摘掉：UC / 安卓的原生视频层
+            // 会浮在 DOM 之上，无论 z-index 多高都会盖住这个弹窗。
             const videoSnapshot = teardownMobileVideo();
             let activeController = null;
 
             const overlay = document.createElement('div');
-            overlay.className = 'fixed inset-0 z-[2147483000] flex items-center justify-center bg-black/85 backdrop-blur-sm px-4';
+            overlay.className = 'save-overlay fixed inset-0 flex items-center justify-center bg-black/85 backdrop-blur-sm px-4';
+            // UC / 夸克对 position:fixed 的层叠处理有 bug，这里用内联样式 +
+            // translateZ(0) 强制提升成独立合成层，避免被视频浮层盖住。
+            overlay.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:2147483647;'
+                + 'display:flex;align-items:center;justify-content:center;padding:16px;'
+                + 'background:rgba(0,0,0,.85);transform:translateZ(0);-webkit-transform:translateZ(0);'
+                + 'will-change:transform;overscroll-behavior:contain;';
             overlay.innerHTML = `
-                <div class="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl text-center">
+                <div class="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl text-center" style="position:relative;z-index:1">
                     <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-500/20 text-blue-300"><i class="fa-solid fa-video"></i></div>
                     <h3 class="text-lg font-bold text-white mb-1">保存视频</h3>
-                    <p class="save-size text-xs text-slate-500 mb-3"></p>
+                    <p class="save-size text-xs text-slate-500 mb-1"></p>
+                    <p class="save-device text-[11px] text-slate-500 mb-3"></p>
                     <p class="save-tip text-sm text-slate-300 mb-4">正在读取视频信息…</p>
                     <div class="save-progress-wrap hidden mb-4">
                         <div class="h-2 overflow-hidden rounded-full bg-slate-800 mb-2"><div class="save-progress h-full w-0 bg-gradient-to-r from-blue-500 to-indigo-500 transition-all"></div></div>
@@ -1873,25 +2010,35 @@
                     </div>
                     <div class="space-y-2">
                         <button type="button" class="save-share w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white">存入相册</button>
-                        <a class="save-direct block w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100" href="${downloadHref}" download="${finalName}">下载视频文件</a>
+                        <a class="save-direct block w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100" href="${downloadHref}" download="${finalName}" rel="noopener">下载 MP4 视频</a>
                         <a class="save-play block w-full py-2 text-sm text-blue-300" href="${playHref}" target="_blank" rel="noopener">在浏览器打开视频</a>
+                        <button type="button" class="save-copy w-full py-2 text-sm text-slate-400">复制下载链接</button>
                         <button type="button" class="save-close w-full py-2 text-sm text-slate-500">关闭</button>
                     </div>
+                    <p class="save-hint text-[11px] leading-relaxed text-slate-500 mt-3"></p>
                 </div>`;
             document.body.appendChild(overlay);
+            const prevOverflow = document.body.style.overflow;
+            document.body.style.overflow = 'hidden';
 
             const progressWrap = overlay.querySelector('.save-progress-wrap');
             const progressBar = overlay.querySelector('.save-progress');
             const statusEl = overlay.querySelector('.save-status');
             const tipEl = overlay.querySelector('.save-tip');
             const sizeEl = overlay.querySelector('.save-size');
+            const deviceEl = overlay.querySelector('.save-device');
+            const hintEl = overlay.querySelector('.save-hint');
             const shareBtn = overlay.querySelector('.save-share');
             const directLink = overlay.querySelector('.save-direct');
             const playLink = overlay.querySelector('.save-play');
+            const copyBtn = overlay.querySelector('.save-copy');
             const openedAt = Date.now();
+
+            deviceEl.textContent = env.name + (env.isIOS ? ' · iOS' : env.isAndroid ? ' · Android' : '');
 
             const close = () => {
                 if (activeController) { try { activeController.abort(); } catch (e) {} }
+                document.body.style.overflow = prevOverflow;
                 overlay.remove();
                 restoreMobileVideo(videoSnapshot);
             };
@@ -1918,22 +2065,61 @@
             if (!overlay.isConnected) return;
             sizeEl.textContent = totalBytes ? '视频大小 ' + formatSize(totalBytes) : '';
 
-            const canShareFile = !!(navigator.canShare && window.File);
+            const fileShare = supportsFileShare();
             // 量不到大小也先给「存入相册」：真正读取时 fetchMediaBlob 会按
             // MOBILE_SHARE_LIMIT 卡住，超了自动抛 TOO_LARGE 切到不占内存的方案。
-            const shareMode = canShareFile && (totalBytes === 0 || totalBytes <= MOBILE_SHARE_LIMIT);
+            const shareMode = fileShare && !env.isWeChat && (totalBytes === 0 || totalBytes <= MOBILE_SHARE_LIMIT);
+            const primaryCls = 'w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white block';
+            const secondaryCls = 'w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100 block';
 
-            if (shareMode) {
-                tipEl.textContent = isIOS
-                    ? '点“存入相册”，在系统菜单里选“存储视频”。'
-                    : '点“存入相册”，在系统菜单里选择保存位置。';
-                shareBtn.style.display = 'block';
-            } else {
-                tipEl.textContent = isIOS
-                    ? '这个视频较大，直接点“在浏览器打开视频”，再点右下角分享 → 存储视频（不占内存，最稳）。'
-                    : '点“下载视频文件”即可保存，进度在通知栏或浏览器下载列表查看。';
+            if (env.isWeChat) {
+                // 微信内置浏览器限制最多：只能引导到系统浏览器
                 shareBtn.style.display = 'none';
-                if (isIOS) playLink.className = 'save-play block w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white';
+                directLink.className = 'save-direct ' + secondaryCls;
+                tipEl.textContent = '微信里不能直接保存视频。请点右上角 ··· → 在浏览器打开，再保存。';
+                playLink.className = 'save-play ' + primaryCls;
+                hintEl.textContent = '也可以点「复制下载链接」，粘贴到手机自带浏览器里打开下载。';
+            } else if (env.isIOS) {
+                if (shareMode) {
+                    shareBtn.style.display = 'block';
+                    shareBtn.textContent = '存入相册（推荐）';
+                    tipEl.textContent = '点「存入相册」，在系统菜单里选「存储视频」。';
+                    // iOS 上「下载」只会落到“文件”App，不是相册，所以是次要选项
+                    directLink.className = 'save-direct ' + secondaryCls;
+                    directLink.innerHTML = '下载到「文件」（.mp4）';
+                    hintEl.textContent = '系统菜单里没有「存储视频」？先点「在浏览器打开视频」，再长按画面 → 存储到照片。';
+                } else {
+                    // 小于 iOS 16.4 或大文件：分享不可用，最稳的是原生播放器长按保存
+                    shareBtn.style.display = 'none';
+                    playLink.className = 'save-play ' + primaryCls;
+                    playLink.textContent = '打开视频后长按保存';
+                    tipEl.textContent = totalBytes > MOBILE_SHARE_LIMIT
+                        ? '视频较大，建议用系统播放器打开后长按保存（不占内存，最稳）。'
+                        : '点「打开视频后长按保存」，长按画面 → 存储到照片。';
+                    directLink.className = 'save-direct ' + secondaryCls;
+                    hintEl.textContent = '若长按没有反应，点「下载到文件」把 .mp4 存到「文件」App，再到相册导入。';
+                }
+            } else {
+                // 安卓（Chrome / UC / QQ / 夸克 / 百度）：下载 .mp4 最稳。
+                // 这些浏览器的「分享」里通常没有“存相册”，反而容易让人以为失败了。
+                directLink.className = 'save-direct ' + primaryCls;
+                directLink.innerHTML = '下载 MP4 视频';
+                if (shareMode) {
+                    shareBtn.style.display = 'block';
+                    shareBtn.textContent = '分享 / 存到相册';
+                } else {
+                    shareBtn.style.display = 'none';
+                }
+                if (env.isUC) {
+                    tipEl.textContent = '点「下载 MP4 视频」，文件会进 UC 的下载列表。';
+                    hintEl.textContent = '相册里找不到？打开 UC 菜单 → 下载 / 文件，找到这个 mp4 长按 → 保存到相册。仍不行就点「复制下载链接」，粘贴到系统浏览器下载。';
+                } else if (env.isQuark || env.isQQ || env.isBaidu) {
+                    tipEl.textContent = '点「下载 MP4 视频」即可，进度在浏览器下载列表里。';
+                    hintEl.textContent = '下载完在相册里看不到？到浏览器的「下载 / 文件」里找到这个 mp4，长按选择保存到相册。';
+                } else {
+                    tipEl.textContent = '点「下载 MP4 视频」即可，进度在通知栏或下载列表里。';
+                    hintEl.textContent = '下载完成后，相册通常会自动出现；没有的话到「文件 / Downloads」里找这个 mp4。';
+                }
             }
 
             // 弹窗停留过久，原直链多半已过期：点下载前先换一条新链，
@@ -1957,6 +2143,14 @@
                 directLink.click();
             });
 
+            if (copyBtn) {
+                copyBtn.addEventListener('click', async () => {
+                    await refreshHref();
+                    // copyToClipboard 会把 / 开头的相对地址补成完整链接，正好可以粘贴到系统浏览器
+                    copyToClipboard(directLink.getAttribute('href'));
+                });
+            }
+
             if (shareBtn) {
                 shareBtn.addEventListener('click', async () => {
                     if (shareBtn.dataset.busy === '1') return;
@@ -1977,7 +2171,7 @@
                         const file = new File([blob], finalName, { type: 'video/mp4' });
                         if (navigator.canShare && navigator.canShare({ files: [file] })) {
                             await navigator.share({ files: [file], title: finalName });
-                            showToast('✅ 请在系统菜单中选择“存储视频”', 'success');
+                            showToast('✅ 请在系统菜单中选择「存储视频」', 'success');
                             close();
                             return;
                         }
@@ -1986,11 +2180,11 @@
                         if (error?.name === 'AbortError') { statusEl.textContent = '已取消'; return; }
                         progressWrap.classList.add('hidden');
                         if (error?.code === 'TOO_LARGE') {
-                            tipEl.textContent = '视频较大，已切换到不占内存的方式：请点“下载视频文件”或“在浏览器打开视频”。';
+                            tipEl.textContent = '视频较大，已切换到不占内存的方式：请用「下载 MP4 视频」或「在浏览器打开视频」。';
                             shareBtn.style.display = 'none';
-                            if (isIOS) playLink.className = 'save-play block w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white';
+                            if (env.isIOS) playLink.className = 'save-play ' + primaryCls;
                         } else {
-                            tipEl.textContent = '读取失败，请改用“下载视频文件”，或点“在浏览器打开视频”后长按保存。';
+                            tipEl.textContent = '分享被浏览器拦住了，改用「下载 MP4 视频」或「在浏览器打开视频」再保存。';
                         }
                         showToast(error?.message || '读取失败，请改用下载按钮', 'error');
                     } finally {
@@ -2001,7 +2195,7 @@
             }
 
             directLink.addEventListener('click', () => {
-                showToast(isIOS ? '已开始下载，请到“文件”App 查看' : '已开始下载，请在通知栏或下载列表查看进度', 'success');
+                showToast(env.isIOS ? '已开始下载，请到「文件」App 查看' : '已开始下载，请在通知栏或下载列表查看进度', 'success');
             });
         }
 
@@ -2255,6 +2449,17 @@
         const singleClearBtn = document.getElementById('clear-btn');
         document.getElementById('btn-text').textContent = isMobileLayout() ? '开始解析' : '解析音频';
         
+        // 手机端「复制第二条链接 → 粘贴」最容易变成「旧链接 + 新链接 拼在一起」，
+        // 于是解析出来的还是上一条，用户就会觉得"转不过来"。粘贴时直接整体替换。
+        singleUrlInput.addEventListener('paste', (e) => {
+            const text = e.clipboardData && e.clipboardData.getData('text');
+            if (!text || !/https?:\/\//i.test(text)) return;
+            e.preventDefault();
+            singleUrlInput.value = text.trim();
+            singleUrlInput.dispatchEvent(new Event('input', { bubbles: true }));
+            singleClearBtn.classList.remove('hidden');
+        });
+
         singleUrlInput.addEventListener('input', e => {
             e.target.value.length > 0 ? singleClearBtn.classList.remove('hidden') : singleClearBtn.classList.add('hidden');
         });
@@ -2262,11 +2467,26 @@
             singleUrlInput.value = ''; singleClearBtn.classList.add('hidden'); singleUrlInput.focus();
         });
 
+        let singleSubmitSeq = 0;
         singleForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const urls = extractUrls(singleUrlInput.value);
             if (!urls.length) return showToast('未检测到有效链接', 'error');
-            
+            // 输入框里残留旧链接 + 新粘贴的链接时，最后一条才是用户刚复制的那条。
+            // 之前固定取第一条，会出现「解析了第二条，结果还是上一条」的错觉。
+            const targetUrl = urls[urls.length - 1];
+            if (urls.length > 1) showToast('检测到多个链接，已解析最新的一条', 'info');
+            const seq = ++singleSubmitSeq;
+
+            // 解析新链接前，先把上一条的一切清干净：
+            // 播放器（含还没跑完的换链请求）、换链节流、当前数据。
+            // 之前没清，上一条迟到的换链结果会把新视频的播放地址顶掉，
+            // 表现就是「解析第二条一直转不过来 / 播的还是上一条」。
+            resetRefreshState();
+            MobilePlayback.stop();
+            currentSingleData = null;
+            currentShareUrl = '';
+
             document.getElementById('submit-btn').disabled = true;
             document.getElementById('btn-text').textContent = '解析中...';
             document.getElementById('loading-container').classList.remove('hidden');
@@ -2275,17 +2495,23 @@
             document.getElementById('real-audio-player').pause();
 
             try {
-                currentShareUrl = urls[0];
-                currentSingleData = await fetchVideoDataAPI(urls[0]);
+                const data = await fetchVideoDataAPI(targetUrl);
+                // 连点两次解析时，只认最后一次提交的结果
+                if (seq !== singleSubmitSeq) return;
+                currentShareUrl = targetUrl;
+                currentSingleData = data;
+                resetRefreshState();
                 rememberLastResult(currentShareUrl, currentSingleData);
                 renderSingleResult(currentSingleData);
             } catch (err) {
-                showToast(err.message, 'error');
+                if (seq === singleSubmitSeq) showToast(err.message, 'error');
             } finally {
-                document.getElementById('submit-btn').disabled = false;
-                document.getElementById('btn-text').textContent = isMobileLayout() ? '开始解析' : '解析音频';
-                document.getElementById('loading-container').classList.add('hidden');
-                document.getElementById('loading-container').classList.remove('flex');
+                if (seq === singleSubmitSeq) {
+                    document.getElementById('submit-btn').disabled = false;
+                    document.getElementById('btn-text').textContent = isMobileLayout() ? '开始解析' : '解析音频';
+                    document.getElementById('loading-container').classList.add('hidden');
+                    document.getElementById('loading-container').classList.remove('flex');
+                }
             }
         });
 

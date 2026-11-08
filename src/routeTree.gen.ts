@@ -24,6 +24,7 @@ import { Route as ApiPublicOfficialPaymentNotifyRouteImport } from './routes/api
 import { Route as ApiPublicMediaStreamRouteImport } from './routes/api/public/media-stream'
 import { Route as ApiPublicMediaProxyRouteImport } from './routes/api/public/media-proxy'
 import { Route as ApiPublicAuthTokenRouteImport } from './routes/api/public/auth-token'
+import { Route as ApiPublicDlNameRouteImport } from './routes/api/public/dl.$name'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -100,6 +101,11 @@ const ApiPublicAuthTokenRoute = ApiPublicAuthTokenRouteImport.update({
   path: '/api/public/auth-token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicDlNameRoute = ApiPublicDlNameRouteImport.update({
+  id: '/api/public/dl/$name',
+  path: '/api/public/dl/$name',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -116,6 +122,7 @@ export interface FileRoutesByFullPath {
   '/api/recharge/create': typeof ApiRechargeCreateRoute
   '/api/recharge/products': typeof ApiRechargeProductsRoute
   '/api/recharge/status': typeof ApiRechargeStatusRoute
+  '/api/public/dl/$name': typeof ApiPublicDlNameRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -132,6 +139,7 @@ export interface FileRoutesByTo {
   '/api/recharge/create': typeof ApiRechargeCreateRoute
   '/api/recharge/products': typeof ApiRechargeProductsRoute
   '/api/recharge/status': typeof ApiRechargeStatusRoute
+  '/api/public/dl/$name': typeof ApiPublicDlNameRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -150,6 +158,7 @@ export interface FileRoutesById {
   '/api/recharge/create': typeof ApiRechargeCreateRoute
   '/api/recharge/products': typeof ApiRechargeProductsRoute
   '/api/recharge/status': typeof ApiRechargeStatusRoute
+  '/api/public/dl/$name': typeof ApiPublicDlNameRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -168,6 +177,7 @@ export interface FileRouteTypes {
     | '/api/recharge/create'
     | '/api/recharge/products'
     | '/api/recharge/status'
+    | '/api/public/dl/$name'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -184,6 +194,7 @@ export interface FileRouteTypes {
     | '/api/recharge/create'
     | '/api/recharge/products'
     | '/api/recharge/status'
+    | '/api/public/dl/$name'
   id:
     | '__root__'
     | '/'
@@ -201,6 +212,7 @@ export interface FileRouteTypes {
     | '/api/recharge/create'
     | '/api/recharge/products'
     | '/api/recharge/status'
+    | '/api/public/dl/$name'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -218,6 +230,7 @@ export interface RootRouteChildren {
   ApiRechargeCreateRoute: typeof ApiRechargeCreateRoute
   ApiRechargeProductsRoute: typeof ApiRechargeProductsRoute
   ApiRechargeStatusRoute: typeof ApiRechargeStatusRoute
+  ApiPublicDlNameRoute: typeof ApiPublicDlNameRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -327,6 +340,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicAuthTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/dl/$name': {
+      id: '/api/public/dl/$name'
+      path: '/api/public/dl/$name'
+      fullPath: '/api/public/dl/$name'
+      preLoaderRoute: typeof ApiPublicDlNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -357,6 +377,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiRechargeCreateRoute: ApiRechargeCreateRoute,
   ApiRechargeProductsRoute: ApiRechargeProductsRoute,
   ApiRechargeStatusRoute: ApiRechargeStatusRoute,
+  ApiPublicDlNameRoute: ApiPublicDlNameRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
