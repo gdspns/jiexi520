@@ -1103,6 +1103,10 @@
 
         // ================= 全局状态 =================
         let currentSingleData = null;
+        // 用户最后解析的那个分享链接：直链过期时用它换新直链（不扣积分）
+        let currentShareUrl = '';
+        let refreshInFlight = null;
+        let lastRefreshAt = 0;
         const isMobileLayout = () => window.matchMedia('(max-width: 640px)').matches;
         let batchResultsData = []; 
 
@@ -1166,7 +1170,43 @@
                 images: Array.isArray(data.images) ? data.images : [],
                 original_url: data.original_url || url,
                 platform: data.platform || determinePlatform(url),
+                refresh_token: data.refresh_token || '',
             };
+        }
+
+        // 直链过期（抖音/快手/X 的 CDN 地址带时效，通常几十分钟）后，
+        // 用解析时拿到的票据重新解析同一个分享链接换一条新地址。
+        // 服务端校验票据签名，所以不会重复扣积分，也不能被拿来白嫖。
+        async function refreshVideoUrl() {
+            if (!currentSingleData || !currentShareUrl || !currentSingleData.refresh_token) return null;
+            if (refreshInFlight) return refreshInFlight;
+            // 10 秒内不重复刷新，避免卡顿时把解析接口打爆
+            if (Date.now() - lastRefreshAt < 10000) return null;
+            refreshInFlight = (async () => {
+                try {
+                    const sb = window.__sb;
+                    const { data: sess } = await sb.auth.getSession();
+                    const token = sess.session?.access_token;
+                    if (!token) return null;
+                    const response = await fetch('/api/parse', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                        body: JSON.stringify({ url: currentShareUrl, refresh_token: currentSingleData.refresh_token }),
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok || !data.video_url) return null;
+                    currentSingleData.video_url = data.video_url;
+                    if (data.music_url) currentSingleData.music_url = data.music_url;
+                    if (data.refresh_token) currentSingleData.refresh_token = data.refresh_token;
+                    lastRefreshAt = Date.now();
+                    return data.video_url;
+                } catch {
+                    return null;
+                } finally {
+                    setTimeout(() => { refreshInFlight = null; }, 2000);
+                }
+            })();
+            return refreshInFlight;
         }
 
         // --- 新增强化：更适合二进制流传输的高级 CORS 代理 ---
@@ -1335,65 +1375,110 @@
             return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
         }
 
-        // 通过同源代理分块读取视频：不会有跨域预检，也带上了正确的 Referer，
-        // 支持 Range 时按 2MB 分块（省内存），不支持时退回整体流式读取。
-        async function fetchMediaBlob(url, onProgress, signal) {
-            const src = proxifyVideo(url);
-            const probe = await fetchWithTimeout(src, {
-                headers: { Range: 'bytes=0-0' },
-                cache: 'no-store',
-                signal,
-            }, 25000);
-            if (!probe.ok) throw new Error('视频读取失败（' + probe.status + '）');
-
-            const contentRange = probe.headers.get('Content-Range') || '';
-            const total = Number(contentRange.split('/')[1] || 0);
-
-            if (probe.status !== 206 || !total) {
-                if (probe.status === 200 && probe.body && onProgress) {
-                    const cl = Number(probe.headers.get('Content-Length') || 0);
-                    const reader = probe.body.getReader();
-                    const chunks = [];
-                    let received = 0;
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-                        chunks.push(value);
-                        received += value.length;
-                        onProgress(cl ? (received / cl) * 100 : null, received);
-                    }
-                    return new Blob(chunks, { type: 'video/mp4' });
+        // 拉取单个 Range 段：超时覆盖"拿到响应 + 读完 body"全过程，
+        // 否则 CDN 中途不吐数据时 request 会永远挂着（这正是保存卡在一半的原因）。
+        async function fetchRangeBuffer(url, start, end, signal, timeoutMs = 30000) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            const relay = () => controller.abort();
+            if (signal) {
+                if (signal.aborted) controller.abort();
+                else signal.addEventListener('abort', relay, { once: true });
+            }
+            try {
+                const response = await fetch(url, {
+                    headers: { Range: `bytes=${start}-${end}` },
+                    cache: 'no-store',
+                    signal: controller.signal,
+                });
+                if (response.status !== 206 && response.status !== 200) {
+                    const err = new Error('HTTP ' + response.status);
+                    err.status = response.status;
+                    throw err;
                 }
-                const blob = await probe.blob();
-                onProgress(100, blob.size);
-                return blob;
+                const buf = new Uint8Array(await response.arrayBuffer());
+                return { response, buf };
+            } finally {
+                clearTimeout(timer);
+                if (signal) signal.removeEventListener('abort', relay);
+            }
+        }
+
+        // 通过同源代理分块读取视频：不会有跨域预检，也带上了正确的 Referer。
+        // options.refresh: 直链过期（403/410）时用它换取新链接，然后从当前断点续传，
+        // 已经下载的部分不丢——这是"保存到一半就失败"的修复点。
+        async function fetchMediaBlob(url, onProgress, signal, options = {}) {
+            const refresh = typeof options.refresh === 'function' ? options.refresh : null;
+            let src = proxifyVideo(url);
+            let refreshed = 0;
+            const tryRefresh = async () => {
+                if (!refresh || refreshed >= 3) return false;
+                refreshed += 1;
+                const fresh = await refresh();
+                if (!fresh) return false;
+                src = proxifyVideo(fresh);
+                return true;
+            };
+
+            let probe = null;
+            for (let attempt = 0; attempt < 4; attempt++) {
+                try {
+                    probe = await fetchRangeBuffer(src, 0, 0, signal, 25000);
+                    break;
+                } catch (error) {
+                    if (error?.name === 'AbortError') throw error;
+                    const status = Number(error?.status || 0);
+                    if ((status === 403 || status === 410 || status === 404) && await tryRefresh()) continue;
+                    if (attempt === 3) throw error;
+                    await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+                }
+            }
+            if (!probe) throw new Error('视频读取失败');
+
+            const contentRange = probe.response.headers.get('Content-Range') || '';
+            const total = Number(contentRange.split('/')[1] || probe.response.headers.get('Content-Length') || 0);
+
+            // 源站不支持分段：只能整包流式读取
+            if (probe.response.status !== 206 || !total) {
+                const response = await fetch(src, { cache: 'no-store', signal });
+                if (!response.ok) throw new Error('视频读取失败（' + response.status + '）');
+                const length = Number(response.headers.get('Content-Length') || 0);
+                const reader = response.body.getReader();
+                const chunks = [];
+                let received = 0;
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                    received += value.length;
+                    onProgress(length ? (received / length) * 100 : null, received);
+                }
+                return new Blob(chunks, { type: 'video/mp4' });
             }
 
-            const chunkSize = 2 * 1024 * 1024;
-            const chunks = [];
+            const chunkSize = 4 * 1024 * 1024;
+            const parts = [];
             let received = 0;
             for (let start = 0; start < total; start += chunkSize) {
                 const end = Math.min(total - 1, start + chunkSize - 1);
-                let part = null;
-                for (let attempt = 0; attempt < 3 && !part; attempt++) {
+                let buf = null;
+                for (let attempt = 0; attempt < 6 && !buf; attempt++) {
                     try {
-                        const response = await fetchWithTimeout(src, {
-                            headers: { Range: `bytes=${start}-${end}` },
-                            cache: 'no-store',
-                            signal,
-                        }, 25000);
-                        if (response.status !== 206) throw new Error('分段响应异常 ' + response.status);
-                        part = await response.blob();
+                        const { buf: part } = await fetchRangeBuffer(src, start, end, signal, 40000);
+                        buf = part;
                     } catch (error) {
-                        if (attempt === 2) throw error;
-                        await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+                        if (error?.name === 'AbortError') throw error;
+                        const status = Number(error?.status || 0);
+                        if ((status === 403 || status === 410 || status === 404) && await tryRefresh()) continue;
+                        if (attempt === 5) throw error;
+                        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
                     }
                 }
-                chunks.push(part);
-                received += part.size;
+                parts.push(buf);
+                received += buf.length;
                 onProgress((received / total) * 100, received);
             }
-            return new Blob(chunks, { type: 'video/mp4' });
+            return new Blob(parts, { type: 'video/mp4' });
         }
 
         async function promptMobileVideoSave(url, fileName) {
@@ -1435,6 +1520,7 @@
             const statusEl = overlay.querySelector('.save-status');
             const shareBtn = overlay.querySelector('.save-share');
             const directLink = overlay.querySelector('.save-direct');
+            const openedAt = Date.now();
 
             const close = () => {
                 if (activeController) { try { activeController.abort(); } catch (e) {} }
@@ -1443,6 +1529,22 @@
             };
             overlay.querySelector('.save-close').addEventListener('click', close);
             overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
+
+            // 弹窗停留超过 90 秒后，原直链很可能已经过期：点击下载前先换一条新链，
+            // 否则浏览器下载管理器会拿到 410 直接失败。
+            if (directLink) {
+                directLink.addEventListener('click', async (event) => {
+                    if (Date.now() - openedAt < 90000) return;
+                    event.preventDefault();
+                    const original = directLink.innerHTML;
+                    directLink.innerHTML = '正在获取新链接…';
+                    const fresh = await refreshVideoUrl();
+                    const href = toDownloadUrl(fresh || url, finalName);
+                    directLink.setAttribute('href', href);
+                    directLink.innerHTML = original;
+                    window.location.href = href;
+                });
+            }
 
             if (shareBtn) {
                 shareBtn.addEventListener('click', async () => {
@@ -1460,7 +1562,7 @@
                                 progressBar.style.width = `${Math.min(100, percent)}%`;
                                 statusEl.textContent = `正在读取视频 ${Math.round(percent)}%`;
                             }
-                        }, activeController.signal);
+                        }, activeController.signal, { refresh: refreshVideoUrl });
                         const file = new File([blob], finalName, { type: 'video/mp4' });
                         if (navigator.canShare && navigator.canShare({ files: [file] })) {
                             await navigator.share({ files: [file], title: finalName });
@@ -1767,6 +1869,7 @@
             document.getElementById('real-audio-player').pause();
 
             try {
+                currentShareUrl = urls[0];
                 currentSingleData = await fetchVideoDataAPI(urls[0]);
                 renderSingleResult(currentSingleData);
             } catch (err) {
@@ -1799,6 +1902,7 @@
                     '/api/public/video-compat?url=' + encodeURIComponent(data.video_url),
                 ];
                 mobileVideo.dataset.stage = '0';
+                mobileVideo.dataset.refreshed = '0';
                 videoState.classList.remove('hidden');
                 videoSpinner.style.display = 'block';
                 videoStatus.textContent = '视频加载中…';
@@ -1810,12 +1914,78 @@
                     videoReady.style.display = 'flex';
                     watchBtn.style.display = 'flex';
                 };
+
+                // 卡顿看门狗：播放中 9 秒没有任何进展，判定直链过期或被限速，
+                // 自动换一条新直链并从当前进度续播，用户不需要刷新页面。
+                let stallTimer = null;
+                let recovering = false;
+                const clearStall = () => { if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } };
+                const resumeAt = (at, autoplay) => {
+                    mobileVideo.onloadedmetadata = () => {
+                        try { if (at > 0.5) mobileVideo.currentTime = at; } catch (e) {}
+                        if (autoplay) mobileVideo.play().catch(() => {});
+                    };
+                };
+                const recoverPlayback = async () => {
+                    if (recovering) return;
+                    recovering = true;
+                    const at = mobileVideo.currentTime || 0;
+                    const wasPlaying = !mobileVideo.paused;
+                    videoState.classList.remove('hidden');
+                    videoSpinner.style.display = 'block';
+                    videoStatus.style.display = 'block';
+                    videoStatus.textContent = '正在恢复播放…';
+                    const fresh = await refreshVideoUrl();
+                    if (fresh) {
+                        playSources[0] = proxifyVideo(fresh);
+                        mobileVideo.dataset.stage = '0';
+                        mobileVideo.dataset.refreshed = '0';
+                        resumeAt(at, wasPlaying);
+                        mobileVideo.src = playSources[0];
+                        mobileVideo.load();
+                        videoSpinner.style.display = 'none';
+                        videoStatus.style.display = 'none';
+                        videoState.classList.add('hidden');
+                    } else {
+                        videoSpinner.style.display = 'none';
+                        videoStatus.style.display = 'block';
+                        videoStatus.textContent = '视频链接已失效，请重新解析';
+                        videoReady.style.display = 'flex';
+                    }
+                    recovering = false;
+                };
+                const armStall = () => {
+                    if (mobileVideo.paused || mobileVideo.ended) return;
+                    clearStall();
+                    stallTimer = setTimeout(recoverPlayback, 9000);
+                };
+
                 mobileVideo.oncanplay = markVideoReady;
                 mobileVideo.onloadeddata = markVideoReady;
                 // iOS Safari 在用户手势播放前通常只预载元数据，不会触发 loadeddata/canplay。
                 mobileVideo.onloadedmetadata = markVideoReady;
-                mobileVideo.onplaying = () => videoState.classList.add('hidden');
-                mobileVideo.onerror = () => {
+                mobileVideo.onplaying = () => { clearStall(); videoState.classList.add('hidden'); };
+                mobileVideo.onwaiting = armStall;
+                mobileVideo.onstalled = armStall;
+                mobileVideo.onseeking = clearStall;
+                mobileVideo.ontimeupdate = clearStall;
+                mobileVideo.onerror = async () => {
+                    // 直链过期多半表现为媒体解码错误，先静默换一条新直链重试，
+                    // 再退到 ffmpeg 转码，最后才提示失败。
+                    if (mobileVideo.dataset.refreshed === '0') {
+                        mobileVideo.dataset.refreshed = '1';
+                        const at = mobileVideo.currentTime || 0;
+                        const wasPlaying = !mobileVideo.paused;
+                        const fresh = await refreshVideoUrl();
+                        if (fresh) {
+                            playSources[0] = proxifyVideo(fresh);
+                            mobileVideo.dataset.stage = '0';
+                            resumeAt(at, wasPlaying);
+                            mobileVideo.src = playSources[0];
+                            mobileVideo.load();
+                            return;
+                        }
+                    }
                     const stage = Number(mobileVideo.dataset.stage || 0);
                     if (stage + 1 < playSources.length) {
                         mobileVideo.dataset.stage = String(stage + 1);
@@ -2196,6 +2366,36 @@
         }
         document.getElementById('close-modal-btn').addEventListener('click', closeModal);
         vModal.addEventListener('click', e => { if(e.target === vModal) closeModal(); });
+
+        // 桌面端弹窗播放器：卡住 9 秒或解码报错，同样自动换新直链续播
+        let vStallTimer = null;
+        let vRecovering = false;
+        const clearVStall = () => { if (vStallTimer) { clearTimeout(vStallTimer); vStallTimer = null; } };
+        const recoverModalPlayback = async () => {
+            if (vRecovering || vModal.classList.contains('hidden')) return;
+            vRecovering = true;
+            const at = vPlayer.currentTime || 0;
+            const wasPlaying = !vPlayer.paused;
+            const fresh = await refreshVideoUrl();
+            if (fresh) {
+                vPlayer.src = proxify(fresh);
+                vPlayer.onloadedmetadata = () => {
+                    try { if (at > 0.5) vPlayer.currentTime = at; } catch (e) {}
+                    if (wasPlaying) vPlayer.play().catch(() => {});
+                };
+            } else {
+                showToast('视频链接已失效，请重新解析', 'error');
+            }
+            vRecovering = false;
+        };
+        vPlayer.addEventListener('waiting', () => {
+            if (vPlayer.paused || !vPlayer.src) return;
+            clearVStall();
+            vStallTimer = setTimeout(recoverModalPlayback, 9000);
+        });
+        vPlayer.addEventListener('playing', clearVStall);
+        vPlayer.addEventListener('timeupdate', clearVStall);
+        vPlayer.addEventListener('error', () => { if (vPlayer.src) recoverModalPlayback(); });
 
         // ================= Tab 3: 本地文件处理 =================
         const fileInput = document.getElementById('local-file-input');

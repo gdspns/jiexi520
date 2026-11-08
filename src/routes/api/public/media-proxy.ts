@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { parseRange, sliceStream } from "@/lib/media-range";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -133,32 +134,57 @@ async function handle(request: Request): Promise<Response> {
 
   let upstream: Response | null = null;
   let lastError = "";
+  let expired = false;
+  const method = request.method === "HEAD" ? "HEAD" : "GET";
+
   for (const attempt of attemptHeaders) {
-    try {
-      const response = await fetch(parsed.toString(), {
-        method: request.method === "HEAD" ? "HEAD" : "GET",
-        headers: attempt,
-        redirect: "follow",
-      });
-      if (response.ok || response.status === 206 || response.status === 304) {
+    // 只给"等响应头"这一步设超时。视频流本身可能持续几分钟，
+    // 绝不能用一个 AbortSignal.timeout 把整个 body 一起掐掉。
+    for (let retry = 0; retry < 2 && !upstream; retry++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20000);
+      try {
+        const response = await fetch(parsed.toString(), {
+          method,
+          headers: attempt,
+          redirect: "follow",
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (response.ok || response.status === 206 || response.status === 304) {
+          upstream = response;
+          break;
+        }
+        if (response.status === 401 || response.status === 403 || response.status === 404 || response.status === 410) {
+          // 直链带时效，过期后就是这几个状态码，交给前端刷新换新链
+          expired = true;
+          lastError = `upstream ${response.status}`;
+          await response.body?.cancel().catch(() => {});
+          break;
+        }
         upstream = response;
         break;
+      } catch (err) {
+        clearTimeout(timer);
+        lastError = (err as Error).message;
+        if (retry === 0) await new Promise((r) => setTimeout(r, 300));
       }
-      if (response.status !== 401 && response.status !== 403) {
-        upstream = response;
-        break;
-      }
-      lastError = `upstream ${response.status}`;
-      await response.body?.cancel().catch(() => {});
-    } catch (err) {
-      lastError = (err as Error).message;
     }
+    if (upstream) break;
   }
 
   if (!upstream) {
+    const headers = new Headers(CORS);
+    if (expired) {
+      // X-Media-Expired 是给前端用的信号：这条直链已经失效，重新解析一次即可。
+      headers.set("X-Media-Expired", "1");
+      headers.set("Cache-Control", "no-store");
+      return new Response("Media link expired", { status: 410, headers });
+    }
+    headers.set("Cache-Control", "no-store");
     return new Response("Upstream fetch failed: " + (lastError || "unknown"), {
       status: 502,
-      headers: CORS,
+      headers,
     });
   }
 
@@ -182,17 +208,42 @@ async function handle(request: Request): Promise<Response> {
   if (requestedType === "video" && !currentType.toLowerCase().startsWith("video/")) {
     respHeaders.set("content-type", "video/mp4");
   }
+
+  // 上游忽略 Range、回了整包 200：我们自己切出请求的那一段回 206。
+  // 否则每次 seek 都从 0 字节重新下载，长视频必然卡死。
+  const wanted = parseRange(range);
+  const upstreamTotal = Number(upstream.headers.get("content-length") || 0);
+  if (wanted && upstream.status === 200 && upstreamTotal > 0) {
+    const start = Math.min(wanted.start, Math.max(0, upstreamTotal - 1));
+    const end = wanted.end === null ? upstreamTotal - 1 : Math.min(wanted.end, upstreamTotal - 1);
+    const length = end - start + 1;
+    const sliced = new Headers(respHeaders);
+    sliced.delete("content-length");
+    sliced.delete("content-range");
+    sliced.set("content-length", String(length));
+    sliced.set("content-range", `bytes ${start}-${end}/${upstreamTotal}`);
+    sliced.set("accept-ranges", "bytes");
+    sliced.set("Cache-Control", "no-store");
+    if (shouldDownload) sliced.set("Content-Disposition", attachmentName(filename, "download"));
+    return new Response(sliceStream(upstream.body, start, end), {
+      status: 206,
+      statusText: "Partial Content",
+      headers: sliced,
+    });
+  }
+
   // iOS Safari 只有在明确声明分段支持时才会出时长/允许拖动；
   // 上游 206 一定支持分段，缺省补上 bytes。
   if (upstream.status === 206 && !respHeaders.has("accept-ranges")) {
     respHeaders.set("accept-ranges", "bytes");
   }
-  // 分段请求但上游返回 200（源站不支持 Range）：保持原样，播放器会自行整包读取。
   if (shouldDownload) {
     respHeaders.set("Content-Disposition", attachmentName(filename, "download"));
     respHeaders.set("Cache-Control", "no-store");
   } else {
-    respHeaders.set("Cache-Control", "public, max-age=3600");
+    // 不缓存：直链本身有时效，缓存半截 206 分片会让播放器拿到不完整数据，
+    // 表现就是"播一会儿卡住、刷新也放不出来"。
+    respHeaders.set("Cache-Control", "no-store");
   }
 
   return new Response(upstream.body, {

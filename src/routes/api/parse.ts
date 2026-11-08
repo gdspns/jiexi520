@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { signRefreshToken, verifyRefreshToken, REFRESH_TTL_MS } from "@/lib/refresh-token";
 
 const DEFAULT_ENDPOINT = "https://v3.alapi.cn/api/video/url";
 const DEFAULT_TOKEN = "jerv9kslg8kiuxute89fizcl06m5e1";
@@ -328,6 +329,14 @@ async function handle(request: Request): Promise<Response> {
   if (!/^https?:\/\//i.test(url)) return json({ error: "URL 非法" }, 400);
   if (url.length > 1000) return json({ error: "URL 过长" }, 400);
 
+  const userId = userData.user.id;
+  const refreshToken: string = (body?.refresh_token || "").toString();
+  let isRefresh = false;
+  if (refreshToken) {
+    isRefresh = await verifyRefreshToken(refreshToken, userId, url);
+    if (!isRefresh) return json({ error: "直链刷新凭证已失效，请重新解析" }, 401);
+  }
+
   // 读取配置
   const { data: cfgRows, error: cfgError } = await userSb
     .from("app_settings")
@@ -360,13 +369,22 @@ async function handle(request: Request): Promise<Response> {
     return json({ error: e?.message || "解析失败" }, 502);
   }
 
-  // 解析成功后扣除积分（管理员不扣）
-  const { data: remaining, error: consumeErr } = await userSb.rpc("consume_credit");
-  if (consumeErr) {
-    return json({ error: consumeErr.message || "扣减积分失败" }, 402);
+  // 解析成功后扣除积分（管理员不扣）；刷新直链不扣，避免播到一半过期就被迫再花一次
+  let remaining: number | null = null;
+  if (!isRefresh) {
+    const { data, error: consumeErr } = await userSb.rpc("consume_credit");
+    if (consumeErr) {
+      return json({ error: consumeErr.message || "扣减积分失败" }, 402);
+    }
+    remaining = typeof data === "number" ? data : null;
   }
 
-  return json({ ...result, credits_remaining: remaining });
+  return json({
+    ...result,
+    credits_remaining: remaining,
+    is_refresh: isRefresh,
+    refresh_token: await signRefreshToken(userId, url, Date.now() + REFRESH_TTL_MS),
+  });
 }
 
 export const Route = createFileRoute("/api/parse")({
