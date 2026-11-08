@@ -1130,7 +1130,10 @@
             let bgClass = type === 'success' ? 'border-green-500/50 text-green-100' : (type === 'error' ? 'border-red-500/50 text-red-100' : 'border-blue-500/50 text-blue-100');
             let iconClass = type === 'success' ? 'fa-check-circle text-green-400' : (type === 'error' ? 'fa-times-circle text-red-400' : 'fa-info-circle text-blue-400');
             
-            toast.className = `bg-slate-800/90 backdrop-blur border ${bgClass} px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 transform transition-all duration-300 translate-y-10 opacity-0 pointer-events-auto z-[9999]`;
+            // pointer-events 必须是 none：解析成功的提示浮在屏幕正中，正好压在手机端
+            // 视频的播放按钮上，之前这里是 auto，用户点「播放」实际点到了提示条，
+            // 表现为「点了没反应」。提示本身不需要交互，就不要拦事件。
+            toast.className = `bg-slate-800/90 backdrop-blur border ${bgClass} px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 transform transition-all duration-300 translate-y-10 opacity-0 pointer-events-none z-[9999]`;
             toast.innerHTML = `<i class="fa-solid ${iconClass}"></i><span class="text-sm font-medium shadow-sm">${message}</span>`;
             
             container.appendChild(toast);
