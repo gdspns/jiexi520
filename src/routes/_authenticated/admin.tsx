@@ -708,14 +708,22 @@ function AdminPage() {
                   <input value={payCfg.notify_base_url} onChange={(e) => setPayCfg({ ...payCfg, notify_base_url: e.target.value })}
                     placeholder="https://www.你的域名.com"
                     className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500" />
-                  <p className="text-[11px] text-yellow-400/80 mt-1">⚠ 必须填写已发布、公网可访问的正式域名（不要填预览域名）。留空则自动使用当前访问域名。虎皮椒和官方支付都用这一项。</p>
+                  <p className="text-[11px] text-yellow-400/80 mt-1">⚠ 只能填一个：填你的<span className="text-slate-200">主域名</span>（正式、公网可访问、不要预览域名）。留空则每笔订单自动使用用户当时访问的域名。虎皮椒和官方支付都用这一项。</p>
                   {(() => {
-                    const base = (payCfg.notify_base_url || "").replace(/\/+$/, "") || (typeof window !== "undefined" ? window.location.origin : "");
+                    const origin = typeof window !== "undefined" ? window.location.origin : "";
+                    const configured = (payCfg.notify_base_url || "").replace(/\/+$/, "");
+                    const base = configured || origin;
+                    const diff = Boolean(configured && origin && configured !== origin);
                     return (
                       <div className="mt-2 rounded-lg bg-slate-800/60 border border-slate-700 p-2">
                         <p className="text-[11px] text-slate-400 mb-1">当前生效的回调地址（可用浏览器直接打开自检）：</p>
                         <p className="text-[11px] font-mono text-slate-300 break-all">{base}/api/public/official-payment-notify?channel=alipay</p>
                         <p className="text-[11px] font-mono text-slate-300 break-all mt-1">{base}/api/public/official-payment-notify?channel=wechat</p>
+                        <p className="text-[11px] text-slate-500 mt-2">
+                          现在是：{configured ? "固定发往上面这个域名" : `跟随访问域名（当前为 ${origin || "未知"}）`}。
+                          {diff ? `注意：你正从 ${origin} 访问，但回调会发往 ${configured}，只要两个域名指向同一个站点就没问题。` : ""}
+                        </p>
+                        <p className="text-[11px] text-slate-500 mt-1">多个域名指向同一站点时：填主域名即可，用户从任意域名下单，通知都会发到主域名；订单存在数据库里，跟域名无关，不会串单。付款后的页面跳转始终用用户自己访问的域名。</p>
                         <p className="text-[11px] text-yellow-400/80 mt-2">⚠ 若站点前面套了 Cloudflare：必须关闭 Bot Fight Mode / 对该路径放行 POST，否则支付宝、微信的异步通知会被质询页拦掉（表现为“付了钱不到账、页面不跳转”）。即使通知被拦，系统也会在轮询时主动查单补单，不会漏单。</p>
                       </div>
                     );
