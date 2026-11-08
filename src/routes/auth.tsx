@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/auth")({
@@ -29,6 +29,10 @@ function isAllowedEmail(email: string) {
   return ALLOWED_EMAIL_DOMAINS.includes(domain);
 }
 
+// 邮箱联想候选：注册只提示白名单域名，登录额外给几个常见域名
+const SUGGEST_DOMAINS_SIGNUP = ["qq.com", "163.com", "126.com", "sina.com", "foxmail.com", "sina.cn"];
+const SUGGEST_DOMAINS_LOGIN = [...SUGGEST_DOMAINS_SIGNUP, "gmail.com", "139.com", "outlook.com"];
+
 const STEP_LABEL = { email: "邮箱", code: "验证码", password: "密码" } as const;
 const STEP_ORDER = { email: 0, code: 1, password: 2 } as const;
 
@@ -46,6 +50,7 @@ function AuthPage() {
   // 拉新邀请：链接形如 /auth?ref=ABCD1234，注册成功后给双方加次数
   const [refCode, setRefCode] = useState("");
   const claimedRef = useRef(false);
+  const emailInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     try {
@@ -69,6 +74,26 @@ function AuthPage() {
   const isSignup = mode === "signup";
   const isForgot = mode === "forgot";
   const isFlow = isSignup || isForgot;
+
+  // 邮箱联想：只输入了 @ 前面的部分（或域名打了一半）时给出候选
+  const emailSuggestions = useMemo(() => {
+    const raw = email.trim();
+    if (!raw || /\s/.test(raw) || (raw.match(/@/g) || []).length > 1) return [] as string[];
+    const pool = isSignup || isForgot ? SUGGEST_DOMAINS_SIGNUP : SUGGEST_DOMAINS_LOGIN;
+    const at = raw.indexOf("@");
+    const local = at === -1 ? raw : raw.slice(0, at);
+    const typedDomain = at === -1 ? "" : raw.slice(at + 1).toLowerCase();
+    if (!local) return [];
+    return pool
+      .filter((d) => d.startsWith(typedDomain) && d !== typedDomain)
+      .slice(0, 9)
+      .map((d) => `${local}@${d}`);
+  }, [email, mode, isSignup, isForgot]);
+
+  const applySuggestion = (full: string) => {
+    setEmail(full);
+    emailInputRef.current?.focus();
+  };
 
   const resetCodeFlow = () => {
     setStep("email");
@@ -308,12 +333,30 @@ function AuthPage() {
             <input
               type="email"
               required
+              ref={emailInputRef}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               disabled={isFlow && step !== "email"}
               className="mt-1 w-full px-4 py-3 rounded-lg bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-pink-500 disabled:opacity-60"
               placeholder={isSignup ? "QQ / 163 / 新浪 邮箱" : "you@example.com"}
             />
+            {/* 邮箱联想：输入 @ 前面部分即可点选补全 */}
+            {emailSuggestions.length > 0 && (!isFlow || step === "email") && (
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                <span className="text-[11px] text-slate-500 self-center">试试：</span>
+                {emailSuggestions.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => applySuggestion(s)}
+                    className="px-2.5 py-1 rounded-md bg-slate-800 border border-slate-600 text-[11px] font-mono text-slate-300 hover:border-pink-500 hover:text-pink-300 active:bg-slate-700 transition"
+                    title={s}
+                  >
+                    {s.length > 22 ? s.slice(0, 9) + "…@" + s.slice(s.indexOf("@") + 1) : s}
+                  </button>
+                ))}
+              </div>
+            )}
             {isSignup && step === "email" && (
               <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
                 仅支持 <span className="text-slate-300">QQ 邮箱（qq.com / foxmail.com）</span>、
