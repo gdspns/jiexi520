@@ -39,6 +39,14 @@ export const Route = createFileRoute("/api/recharge/status")({
         if (error) return json({ error: error.message }, 500);
         if (!order) return json({ error: "订单不存在" }, 404);
 
+        // 官方支付没有 return_url，异步通知又可能被拦截/丢失。
+        // 轮询时顺手向支付宝/微信主动查一次真实结果，查到就直接补成已支付。
+        if (order.status === "pending" && order.provider === "official") {
+          const { reconcileOfficialOrder } = await import("@/lib/official-reconcile.server");
+          const result = await reconcileOfficialOrder(orderNo);
+          if (result.paid) order.status = "paid";
+        }
+
         // 超时自动标记
         if (order.status === "pending" && new Date(order.expires_at).getTime() < Date.now()) {
           await supabaseAdmin

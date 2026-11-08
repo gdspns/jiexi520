@@ -701,14 +701,25 @@ function AdminPage() {
                   <label className="block text-xs text-slate-400 mb-1">虎皮椒接口地址</label>
                   <input value={payCfg.api_endpoint} onChange={(e) => setPayCfg({ ...payCfg, api_endpoint: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500" />
-                  <p className="text-[11px] text-slate-500 mt-1">默认 https://api.xunhupay.com/payment/do.html ，无特殊需求请勿修改。回调地址会自动设为 /api/public/xunhupay-notify。</p>
+                  <p className="text-[11px] text-slate-500 mt-1">仅在支付渠道选「虎皮椒」时使用。选官方商户后请忽略此项。回调地址会自动设为 /api/public/xunhupay-notify。</p>
                 </div>
                 <div className="mt-3">
                   <label className="block text-xs text-slate-400 mb-1">异步回调域名（重要）</label>
                   <input value={payCfg.notify_base_url} onChange={(e) => setPayCfg({ ...payCfg, notify_base_url: e.target.value })}
-                    placeholder="https://jiexi520.lovable.app"
+                    placeholder="https://www.你的域名.com"
                     className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500" />
-                  <p className="text-[11px] text-yellow-400/80 mt-1">⚠ 必须填写已发布的公网域名（如 https://jiexi520.lovable.app 或绑定的自定义域名）。预览域名 id-preview--*.lovable.app 会拦截外部回调导致付款后不到账。留空则使用当前请求域名。</p>
+                  <p className="text-[11px] text-yellow-400/80 mt-1">⚠ 必须填写已发布、公网可访问的正式域名（不要填预览域名）。留空则自动使用当前访问域名。虎皮椒和官方支付都用这一项。</p>
+                  {(() => {
+                    const base = (payCfg.notify_base_url || "").replace(/\/+$/, "") || (typeof window !== "undefined" ? window.location.origin : "");
+                    return (
+                      <div className="mt-2 rounded-lg bg-slate-800/60 border border-slate-700 p-2">
+                        <p className="text-[11px] text-slate-400 mb-1">当前生效的回调地址（可用浏览器直接打开自检）：</p>
+                        <p className="text-[11px] font-mono text-slate-300 break-all">{base}/api/public/official-payment-notify?channel=alipay</p>
+                        <p className="text-[11px] font-mono text-slate-300 break-all mt-1">{base}/api/public/official-payment-notify?channel=wechat</p>
+                        <p className="text-[11px] text-yellow-400/80 mt-2">⚠ 若站点前面套了 Cloudflare：必须关闭 Bot Fight Mode / 对该路径放行 POST，否则支付宝、微信的异步通知会被质询页拦掉（表现为“付了钱不到账、页面不跳转”）。即使通知被拦，系统也会在轮询时主动查单补单，不会漏单。</p>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="mt-4">
                   <button onClick={onSavePay} disabled={savingPay}

@@ -2540,6 +2540,15 @@
       const closeBtn = document.getElementById("recharge-close");
       let pollTimer = null;
       let countdownTimer = null;
+      let activeOrderNo = null;
+
+      // 从支付宝/微信 App 切回浏览器时，浏览器会暂停后台定时器，
+      // 这里在页面重新可见的瞬间立即查一次，避免用户看到过期的“等待支付中”。
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden && activeOrderNo && !modal.classList.contains("hidden")) {
+          pollOrder(activeOrderNo);
+        }
+      });
 
       function clearTimers() {
         if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
@@ -2549,6 +2558,7 @@
       function closeModal() {
         modal.classList.add("hidden");
         clearTimers();
+        activeOrderNo = null;
         body.innerHTML = "";
         // 清理 URL 上的 recharge 参数
         const u = new URL(location.href);
@@ -2668,9 +2678,10 @@
               <p class="text-xs text-slate-400">支付剩余时间</p>
               <p id="countdown" class="text-xl font-mono font-bold text-orange-400">--:--</p>
             </div>
-            ${order.wap_url ? `<a id="wap-btn" href="${order.wap_url}" target="_blank" rel="noopener" class="block w-full px-4 py-3 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white text-sm font-semibold mb-2"><i class="fa-solid fa-mobile-screen"></i> 手机用户点这里 H5 跳转支付</a>` : ""}
+            ${order.wap_url ? `<a id="wap-btn" href="${order.wap_url}" target="_blank" rel="noopener" class="block w-full px-4 py-3 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white text-sm font-semibold mb-2"><i class="fa-solid fa-mobile-screen"></i> 手机用户点这里直接支付</a>` : ""}
             <p id="r-status" class="text-xs text-slate-400 mt-2">⏳ 等待支付中...</p>
-            <button id="r-cancel" class="mt-3 text-xs text-slate-500 hover:text-slate-300 underline">取消并关闭</button>
+            <button id="r-check" class="mt-2 text-xs text-blue-400 hover:text-blue-300 underline">已付款？点此立即确认</button>
+            <button id="r-cancel" class="mt-3 block mx-auto text-xs text-slate-500 hover:text-slate-300 underline">取消并关闭</button>
           </div>`;
         // 渲染 QR
         const qrBox = body.querySelector("#qr-box");
@@ -2690,6 +2701,13 @@
           qrBox.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(order.qr_url || "")}" alt="QR" />`;
         }
         body.querySelector("#r-cancel").onclick = closeModal;
+        const checkBtn = body.querySelector("#r-check");
+        if (checkBtn) checkBtn.onclick = async () => {
+          const label = checkBtn.textContent;
+          checkBtn.textContent = "正在确认…";
+          await pollOrder(order.order_no);
+          setTimeout(() => { if (checkBtn.isConnected) checkBtn.textContent = label; }, 600);
+        };
 
         // 倒计时
         const expiresAt = new Date(order.expires_at).getTime();
@@ -2712,10 +2730,13 @@
         countdownTimer = setInterval(updateCd, 1000);
 
         // 轮询订单状态
+        activeOrderNo = order.order_no;
         pollTimer = setInterval(() => pollOrder(order.order_no), 3000);
       }
 
       async function pollOrder(orderNo) {
+        if (pollOrder.busy) return;
+        pollOrder.busy = true;
         try {
           const { data: sess } = await sb.auth.getSession();
           const token = sess.session?.access_token;
@@ -2728,6 +2749,7 @@
           const status = data.order.status;
           if (status === "paid") {
             clearTimers();
+            activeOrderNo = null;
             body.innerHTML = `
               <div class="text-center py-6">
                 <i class="fa-solid fa-circle-check text-6xl text-green-400 mb-3"></i>
@@ -2746,7 +2768,7 @@
             if (st) st.innerHTML = '⛔ 订单' + (status === "expired" ? "已超时" : "失败") + '，<button id="r-restart" class="underline text-pink-400">重新下单</button>';
             body.querySelector("#r-restart")?.addEventListener("click", () => loadProducts());
           }
-        } catch (e) { /* ignore */ }
+        } catch (e) { /* ignore */ } finally { pollOrder.busy = false; }
       }
 
       async function resumeOrder(orderNo) {
