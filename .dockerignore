@@ -1,7 +1,12 @@
 node_modules
 dist
+.output
+.nitro
 .git
+.gitignore
 .tanstack
 tsconfig.tsbuildinfo
 *.log
 .env
+docker-compose.yml
+SELF_HOST.md
