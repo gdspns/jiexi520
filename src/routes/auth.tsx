@@ -323,6 +323,26 @@ function AuthPage() {
             )}
           </div>
 
+          {/* 选填邀请码：注册邮箱步骤填写，留空不影响注册 */}
+          {isSignup && step === "email" && (
+            <div>
+              <label className="text-xs text-slate-400">邀请码（选填）</label>
+              <input
+                type="text"
+                autoCapitalize="characters"
+                autoComplete="off"
+                maxLength={8}
+                value={refCode}
+                onChange={(e) => setRefCode(e.target.value.trim().toUpperCase())}
+                className="mt-1 w-full px-4 py-3 rounded-lg bg-slate-800 border border-slate-700 text-white font-mono tracking-widest focus:outline-none focus:border-amber-500"
+                placeholder="8 位好友邀请码"
+              />
+              <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+                有好友邀请码？填上注册成功双方都能得解析次数；没有可留空
+              </p>
+            </div>
+          )}
+
           {isForgot && step === "email" && (
             <div className="text-[11px] leading-relaxed text-slate-500">
               忘记密码只需邮箱验证码，验证通过后可直接设置新密码，无需原密码。
