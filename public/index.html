@@ -1246,6 +1246,29 @@
             } catch (e) {}
         }
 
+        // 手机端保存不了时，用户点「复制本站链接」把地址发到电脑。
+        // 这个地址带着 ?u=原视频链接，电脑打开后自动回填，点一下解析就能下载。
+        function prefillFromQuery() {
+            let shared = '';
+            try {
+                shared = new URLSearchParams(location.search).get('u') || '';
+            } catch (e) { return; }
+            if (!shared || !/^https?:\/\//i.test(shared)) return;
+            const input = document.getElementById('url-input');
+            if (!input) return;
+            if (!input.value.trim()) {
+                input.value = shared;
+                input.dispatchEvent(new Event('input'));
+            }
+            const clearBtn = document.getElementById('clear-btn');
+            if (clearBtn && input.value.trim()) clearBtn.classList.remove('hidden');
+            // 去掉参数，避免刷新时反复回填
+            try { history.replaceState(null, '', location.pathname + (location.hash || '')); } catch (e) {}
+            showToast('已带入视频链接，点「开始解析」后即可下载到电脑', 'info');
+            const btn = document.getElementById('submit-btn');
+            if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
         async function restoreLastResult() {
             let saved = null;
             try { saved = JSON.parse(sessionStorage.getItem(LAST_RESULT_KEY) || 'null'); } catch (e) {}
@@ -2016,6 +2039,12 @@
                         <button type="button" class="save-close w-full py-2 text-sm text-slate-500">关闭</button>
                     </div>
                     <p class="save-hint text-[11px] leading-relaxed text-slate-500 mt-3"></p>
+                    <button type="button" class="save-desktop-toggle mt-3 text-[11px] text-slate-500 underline decoration-dotted underline-offset-2">手机保存不了？用电脑网页端保存</button>
+                    <div class="save-desktop hidden mt-2 rounded-xl border border-slate-700/70 bg-slate-800/60 p-3 text-left">
+                        <p class="text-[12px] font-semibold text-slate-200 mb-1"><i class="fa-solid fa-computer mr-1"></i>用电脑网页端保存（最稳）</p>
+                        <p class="text-[11px] leading-relaxed text-slate-400 mb-2">把本站地址发到电脑（微信「文件传输助手」最方便），在电脑浏览器打开后点「解析」，再点「下载无水印视频」就能直接存到电脑（电脑端不受手机相册权限限制）。</p>
+                        <button type="button" class="save-site w-full rounded-lg bg-slate-700 py-2 text-xs font-bold text-white">复制本站链接</button>
+                    </div>
                 </div>`;
             document.body.appendChild(overlay);
             const prevOverflow = document.body.style.overflow;
@@ -2032,7 +2061,40 @@
             const directLink = overlay.querySelector('.save-direct');
             const playLink = overlay.querySelector('.save-play');
             const copyBtn = overlay.querySelector('.save-copy');
+            const desktopToggle = overlay.querySelector('.save-desktop-toggle');
+            const desktopBox = overlay.querySelector('.save-desktop');
+            const siteBtn = overlay.querySelector('.save-site');
             const openedAt = Date.now();
+
+            // 手机端保存受浏览器限制（尤其微信/UC/夸克），给一个明确的第二方案：
+            // 把本站地址发到电脑，用电脑网页端保存。电脑端不走任何浏览器图片/视频
+            // 权限，点「下载视频」就是普通文件下载，最不容易出问题。
+            const revealDesktop = () => {
+                if (!desktopBox) return;
+                desktopBox.classList.remove('hidden');
+                if (desktopToggle) desktopToggle.textContent = '收起电脑端保存说明';
+            };
+            if (desktopToggle) {
+                desktopToggle.addEventListener('click', () => {
+                    if (desktopBox.classList.contains('hidden')) revealDesktop();
+                    else {
+                        desktopBox.classList.add('hidden');
+                        desktopToggle.textContent = '手机保存不了？用电脑网页端保存';
+                    }
+                });
+            }
+            if (siteBtn) {
+                siteBtn.addEventListener('click', () => {
+                    // 链接带上原视频地址（?u=...），电脑打开后自动填进输入框，
+                    // 用户不用再想办法把抖音链接也发到电脑上。
+                    const share = currentShareUrl || (currentSingleData && currentSingleData.original_url) || '';
+                    let link = location.origin + location.pathname;
+                    if (share) link += '?u=' + encodeURIComponent(share);
+                    copyToClipboard(link, share
+                        ? '已复制（含视频链接），发到电脑打开后点「解析」即可下载'
+                        : '本站链接已复制，发到电脑浏览器打开即可');
+                });
+            }
 
             deviceEl.textContent = env.name + (env.isIOS ? ' · iOS' : env.isAndroid ? ' · Android' : '');
 
@@ -2078,7 +2140,8 @@
                 directLink.className = 'save-direct ' + secondaryCls;
                 tipEl.textContent = '微信里不能直接保存视频。请点右上角 ··· → 在浏览器打开，再保存。';
                 playLink.className = 'save-play ' + primaryCls;
-                hintEl.textContent = '也可以点「复制下载链接」，粘贴到手机自带浏览器里打开下载。';
+                hintEl.textContent = '也可以点「复制下载链接」，粘贴到手机自带浏览器里打开下载；还是不行就用下面的电脑网页端保存。';
+                revealDesktop();
             } else if (env.isIOS) {
                 if (shareMode) {
                     shareBtn.style.display = 'block';
@@ -2147,7 +2210,8 @@
                 copyBtn.addEventListener('click', async () => {
                     await refreshHref();
                     // copyToClipboard 会把 / 开头的相对地址补成完整链接，正好可以粘贴到系统浏览器
-                    copyToClipboard(directLink.getAttribute('href'));
+                    copyToClipboard(directLink.getAttribute('href'),
+                        '下载链接已复制，可粘贴到系统浏览器，或发到电脑直接下载');
                 });
             }
 
@@ -2186,7 +2250,8 @@
                         } else {
                             tipEl.textContent = '分享被浏览器拦住了，改用「下载 MP4 视频」或「在浏览器打开视频」再保存。';
                         }
-                        showToast(error?.message || '读取失败，请改用下载按钮', 'error');
+                        revealDesktop();
+                        showToast(error?.message || '保存失败，可改用电脑网页端保存', 'error');
                     } finally {
                         shareBtn.dataset.busy = '0';
                         shareBtn.disabled = false;
@@ -2730,14 +2795,14 @@
             batchList.scrollTop = batchList.scrollHeight; 
         }
 
-        function copyToClipboard(text) {
+        function copyToClipboard(text, successMessage) {
             const toAbs = (s) => (typeof s === 'string' && s.startsWith('/')) ? (window.location.origin + s) : s;
             const value = (typeof text === 'string' && text.includes('\n'))
                 ? text.split('\n').map(toAbs).join('\n')
                 : toAbs(text);
             const ta = document.createElement("textarea"); ta.value = value;
             document.body.appendChild(ta); ta.select();
-            try { document.execCommand('copy'); showToast('已复制到剪贴板', 'success'); } 
+            try { document.execCommand('copy'); showToast(successMessage || '已复制到剪贴板', 'success'); } 
             catch(e) { showToast('复制失败', 'error'); }
             document.body.removeChild(ta);
         }
@@ -3132,6 +3197,8 @@
       sb.auth.getSession().then(({ data }) => {
         currentUser = data.session?.user || null;
         renderBar();
+        // 从电脑/别的设备带链接进来时先回填
+        try { prefillFromQuery(); } catch (e) {}
         // 刷新页面后恢复上次的解析结果（内部会先换一条新直链再渲染）
         try { restoreLastResult(); } catch (e) {}
       });
