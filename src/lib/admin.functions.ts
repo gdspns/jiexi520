@@ -194,3 +194,74 @@ export const listParseLogs = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     return data || [];
   });
+
+// ============ 拉新邀请 ============
+
+export type InviteReportRow = {
+  inviter_id: string;
+  inviter_email: string | null;
+  invite_code: string | null;
+  invitee_count: number;
+  credits_granted: number;
+  credits_to_invitees: number;
+  last_invited_at: string | null;
+  invitees: Array<{
+    email: string | null;
+    created_at: string;
+    inviter_credits: number;
+    invitee_credits: number;
+  }>;
+};
+
+export const getInviteReport = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    const { data, error } = await (supabase as any).rpc("admin_invite_report");
+    if (error) throw new Error(error.message);
+    return ((data as InviteReportRow[]) || []);
+  });
+
+export const getInviteConfig = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    const { data, error } = await supabase
+      .from("app_settings")
+      .select("key,value")
+      .in("key", ["invite_reward_inviter", "invite_reward_invitee", "invite_daily_limit"]);
+    if (error) throw new Error(error.message);
+    const map = new Map<string, number>();
+    (data ?? []).forEach((r: any) => map.set(r.key, Number(r.value)));
+    const pick = (k: string, d: number) => (Number.isFinite(map.get(k)) ? (map.get(k) as number) : d);
+    return {
+      inviter: pick("invite_reward_inviter", 3),
+      invitee: pick("invite_reward_invitee", 2),
+      dailyLimit: pick("invite_daily_limit", 20),
+    };
+  });
+
+export const setInviteRewards = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z
+      .object({
+        inviter: z.number().int().min(0).max(100000),
+        invitee: z.number().int().min(0).max(100000),
+        dailyLimit: z.number().int().min(1).max(10000),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    const { error } = await (supabase as any).rpc("admin_set_invite_rewards", {
+      p_inviter: data.inviter,
+      p_invitee: data.invitee,
+      p_daily_limit: data.dailyLimit,
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });

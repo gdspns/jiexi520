@@ -43,6 +43,20 @@ function AuthPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const timerRef = useRef<number | null>(null);
+  // 拉新邀请：链接形如 /auth?ref=ABCD1234，注册成功后给双方加次数
+  const [refCode, setRefCode] = useState("");
+  const claimedRef = useRef(false);
+
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const r = (sp.get("ref") || sp.get("invite") || "").trim().toUpperCase();
+      if (r) {
+        setRefCode(r);
+        setMode("signup");
+      }
+    } catch {}
+  }, []);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -131,11 +145,27 @@ function AuthPage() {
         type: isSignup ? "email" : "recovery",
       });
       if (error) throw error;
+
+      // 带邀请码注册：此时已登录，立即领取新人奖励（失败不影响注册）
+      let rewardText = "";
+      if (isSignup && refCode && !claimedRef.current) {
+        claimedRef.current = true;
+        try {
+          const { data } = await (supabase as any).rpc("claim_invite", { p_code: refCode });
+          const res = data || {};
+          if (res.ok) rewardText = ` 邀请奖励已到账：你获得 ${res.invitee_credits} 次解析次数。`;
+          else if (res.reason === "already") rewardText = " 该邀请奖励此前已领取过。";
+          else if (res.message) rewardText = ` 邀请奖励未发放：${res.message}。`;
+        } catch (e) {
+          console.warn("claim_invite failed", e);
+        }
+      }
+
       setStep("password");
       setMsg(
-        isSignup
+        (isSignup
           ? "邮箱验证成功！再设置一个密码即可用密码登录（已有账号可直接跳过）。"
-          : "验证成功！请设置新密码。",
+          : "验证成功！请设置新密码。") + rewardText,
       );
     } catch (e: any) {
       const text = String(e?.message || "");
@@ -237,6 +267,12 @@ function AuthPage() {
       <div className="w-full max-w-md bg-slate-900/70 border border-slate-700 rounded-2xl p-8 shadow-2xl backdrop-blur">
         <h1 className="text-2xl font-bold text-white text-center mb-1">音影无损</h1>
         <p className="text-sm text-slate-400 text-center mb-2">{stepHint}</p>
+
+        {isSignup && refCode && (
+          <div className="mt-3 text-[12px] leading-relaxed text-pink-200 bg-pink-500/10 border border-pink-500/30 rounded-lg px-3 py-2 text-center">
+            🎁 好友邀请你加入（邀请码 <span className="font-mono text-pink-300">{refCode}</span>），注册成功即得额外解析次数
+          </div>
+        )}
 
         {/* 进度：邮箱 → 验证码 → 密码 */}
         {isFlow && (

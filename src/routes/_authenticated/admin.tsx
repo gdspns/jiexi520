@@ -1,8 +1,8 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig, listParseLogs } from "@/lib/admin.functions";
+import { Fragment, useEffect, useState } from "react";
+import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig, listParseLogs, getInviteReport, getInviteConfig, setInviteRewards } from "@/lib/admin.functions";
 import { deleteOrder, getPaymentConfig, listOrdersAdmin, listProductsAdmin, setPaymentConfig, upsertProduct, deleteProduct } from "@/lib/payment.functions";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -30,7 +30,7 @@ export const Route = createFileRoute("/_authenticated/admin")({
   ),
 });
 
-type MenuKey = "users" | "settings" | "products" | "orders" | "logs";
+type MenuKey = "users" | "settings" | "products" | "orders" | "logs" | "invites";
 
 function AdminPage() {
   const navigate = useNavigate();
@@ -342,6 +342,7 @@ function AdminPage() {
     { key: "users", label: "用户管理", icon: "👤" },
     { key: "settings", label: "系统配置", icon: "⚙️" },
     { key: "logs", label: "解析日志", icon: "📜" },
+    { key: "invites", label: "邀请拉新", icon: "🎁" },
   ];
 
   const switchMenu = (key: MenuKey) => {
@@ -424,6 +425,7 @@ function AdminPage() {
             {activeMenu === "products" && "充值商品管理"}
             {activeMenu === "orders" && "订单管理"}
             {activeMenu === "logs" && "解析日志"}
+            {activeMenu === "invites" && "邀请拉新"}
           </h2>
         </header>
 
@@ -885,6 +887,9 @@ function AdminPage() {
 
           {/* ========== 解析日志 ========== */}
           {activeMenu === "logs" && <ParseLogsPanel />}
+
+          {/* ========== 邀请拉新 ========== */}
+          {activeMenu === "invites" && <InvitesPanel />}
         </div>
       </main>
 
@@ -992,6 +997,248 @@ function ParseLogsPanel() {
               ))}
               {logs.length === 0 && (
                 <tr><td colSpan={7} className="text-center text-slate-500 py-8">暂无日志</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+type InviteReportRow = {
+  inviter_id: string;
+  inviter_email: string | null;
+  invite_code: string | null;
+  invitee_count: number;
+  credits_granted: number;
+  credits_to_invitees: number;
+  last_invited_at: string | null;
+  invitees: Array<{
+    email: string | null;
+    created_at: string;
+    inviter_credits: number;
+    invitee_credits: number;
+  }>;
+};
+
+function InvitesPanel() {
+  const fetchReport = useServerFn(getInviteReport);
+  const fetchConfig = useServerFn(getInviteConfig);
+  const saveRewards = useServerFn(setInviteRewards);
+
+  const report = useQuery({ queryKey: ["admin-invites"], queryFn: () => fetchReport(), refetchInterval: 15_000 });
+  const cfg = useQuery({ queryKey: ["admin-invite-config"], queryFn: () => fetchConfig() });
+
+  const [rewardInviter, setRewardInviter] = useState<number | "">("");
+  const [rewardInvitee, setRewardInvitee] = useState<number | "">("");
+  const [dailyLimit, setDailyLimit] = useState<number | "">("");
+  const [saving, setSaving] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  useEffect(() => {
+    const c = cfg.data;
+    if (!c) return;
+    setRewardInviter(c.inviter);
+    setRewardInvitee(c.invitee);
+    setDailyLimit(c.dailyLimit);
+  }, [cfg.data]);
+
+  const rows = (report.data || []) as InviteReportRow[];
+  const totalInvitees = rows.reduce((s, r) => s + (r.invitee_count || 0), 0);
+  const totalGranted = rows.reduce((s, r) => s + (r.credits_granted || 0), 0);
+  const todayStr = new Date().toDateString();
+  const todayInvites = rows.reduce(
+    (s, r) => s + (r.invitees || []).filter((i) => new Date(i.created_at).toDateString() === todayStr).length,
+    0,
+  );
+
+  const onSave = async () => {
+    const a = Number(rewardInviter);
+    const b = Number(rewardInvitee);
+    const c = Number(dailyLimit);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c) || a < 0 || b < 0 || c < 1) {
+      alert("请填写有效数字：邀请人/被邀请人次数不能为负，每日上限至少 1");
+      return;
+    }
+    setSaving(true);
+    try {
+      await saveRewards({ data: { inviter: a, invitee: b, dailyLimit: c } });
+      await cfg.refetch();
+      alert("邀请奖励已保存，立即生效");
+    } catch (e: any) {
+      alert(e?.message || "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const copyInviteLink = async (code: string | null) => {
+    if (!code) return alert("该用户还没有邀请码");
+    const link = `${window.location.origin}/auth?ref=${encodeURIComponent(code)}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      alert("邀请链接已复制：" + link);
+    } catch {
+      alert(link);
+    }
+  };
+
+  return (
+    <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+      <div className="flex items-start justify-between mb-4 gap-4">
+        <div>
+          <h2 className="text-base font-bold">邀请拉新</h2>
+          <p className="text-xs text-slate-400 mt-1">
+            按邀请人分组统计。每邀请一位新用户注册，邀请人与新用户各自获得解析次数。
+          </p>
+        </div>
+        <button
+          onClick={() => report.refetch()}
+          disabled={report.isFetching}
+          className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold disabled:opacity-50 shrink-0"
+        >
+          {report.isFetching ? "刷新中..." : "🔄 刷新"}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+          <p className="text-2xl font-bold text-pink-300">{rows.length}</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">有邀请的用户</p>
+        </div>
+        <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+          <p className="text-2xl font-bold text-slate-100">{totalInvitees}</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">被邀请注册人数</p>
+        </div>
+        <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+          <p className="text-2xl font-bold text-amber-300">{totalGranted}</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">已发放邀请次数</p>
+        </div>
+        <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+          <p className="text-2xl font-bold text-emerald-300">{todayInvites}</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">今日新增</p>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 mb-5">
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-[11px] text-slate-400 mb-1">邀请人得（次）</label>
+            <input
+              type="number"
+              min={0}
+              value={rewardInviter}
+              onChange={(e) => setRewardInviter(e.target.value === "" ? "" : Number(e.target.value))}
+              className="w-24 px-2 py-1.5 rounded-md bg-slate-800 border border-slate-700 text-slate-100 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] text-slate-400 mb-1">新用户得（次）</label>
+            <input
+              type="number"
+              min={0}
+              value={rewardInvitee}
+              onChange={(e) => setRewardInvitee(e.target.value === "" ? "" : Number(e.target.value))}
+              className="w-24 px-2 py-1.5 rounded-md bg-slate-800 border border-slate-700 text-slate-100 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] text-slate-400 mb-1">每人每日上限（人）</label>
+            <input
+              type="number"
+              min={1}
+              value={dailyLimit}
+              onChange={(e) => setDailyLimit(e.target.value === "" ? "" : Number(e.target.value))}
+              className="w-28 px-2 py-1.5 rounded-md bg-slate-800 border border-slate-700 text-slate-100 text-sm"
+            />
+          </div>
+          <button
+            onClick={onSave}
+            disabled={saving || cfg.isLoading}
+            className="px-3 py-1.5 rounded-md bg-pink-600 hover:bg-pink-500 text-white text-xs font-semibold disabled:opacity-50"
+          >
+            {saving ? "保存中..." : "保存奖励设置"}
+          </button>
+        </div>
+        <p className="text-[11px] text-slate-500 mt-2">
+          超出每日上限的邀请仍会记录关系（后台可见），但不再给邀请人发次数，防止刷号。
+        </p>
+      </div>
+
+      {report.error ? (
+        <p className="text-sm text-red-400">{(report.error as Error).message}</p>
+      ) : report.isLoading ? (
+        <p className="text-slate-400 text-sm">加载中...</p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-slate-800">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-900 text-slate-400">
+              <tr>
+                <th className="text-left px-3 py-2">邀请人（谁拉的）</th>
+                <th className="text-left px-3 py-2">邀请码</th>
+                <th className="text-left px-3 py-2">邀请人数</th>
+                <th className="text-left px-3 py-2">获得次数</th>
+                <th className="text-left px-3 py-2">最近邀请</th>
+                <th className="text-left px-3 py-2">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <Fragment key={r.inviter_id}>
+                  <tr className="border-t border-slate-800 hover:bg-slate-900/50">
+                    <td className="px-3 py-2 text-slate-100">
+                      <button
+                        onClick={() => setExpanded(expanded === r.inviter_id ? null : r.inviter_id)}
+                        className="text-left hover:text-pink-300"
+                        title="点击展开被邀请人明细"
+                      >
+                        <span className="mr-1 text-xs text-slate-500">{expanded === r.inviter_id ? "▾" : "▸"}</span>
+                        {r.inviter_email || "—"}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-slate-300">{r.invite_code || "—"}</td>
+                    <td className="px-3 py-2 text-slate-200 font-semibold">{r.invitee_count}</td>
+                    <td className="px-3 py-2 text-amber-300">{r.credits_granted}</td>
+                    <td className="px-3 py-2 text-slate-400 text-xs whitespace-nowrap">
+                      {r.last_invited_at ? new Date(r.last_invited_at).toLocaleString("zh-CN") : "—"}
+                    </td>
+                    <td className="px-3 py-2">
+                      <button
+                        onClick={() => copyInviteLink(r.invite_code)}
+                        className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px]"
+                      >
+                        复制邀请链接
+                      </button>
+                    </td>
+                  </tr>
+                  {expanded === r.inviter_id && (
+                    <tr key={r.inviter_id + "-detail"} className="border-t border-slate-800 bg-slate-950/60">
+                      <td colSpan={6} className="px-3 py-2">
+                        <div className="text-[11px] text-slate-400 mb-1.5">被邀请人明细</div>
+                        <div className="space-y-1">
+                          {(r.invitees || []).map((i, idx) => (
+                            <div key={idx} className="flex items-center justify-between gap-3 text-xs">
+                              <span className="text-slate-200 truncate">{i.email || "—"}</span>
+                              <span className="text-slate-500 whitespace-nowrap">
+                                {new Date(i.created_at).toLocaleString("zh-CN")}
+                              </span>
+                              <span className="text-amber-300 whitespace-nowrap">
+                                邀请人 +{i.inviter_credits} / 新人 +{i.invitee_credits}
+                              </span>
+                            </div>
+                          ))}
+                          {(r.invitees || []).length === 0 && <p className="text-slate-500 text-xs">暂无明细</p>}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="text-center text-slate-500 py-8">还没有任何邀请记录</td>
+                </tr>
               )}
             </tbody>
           </table>
