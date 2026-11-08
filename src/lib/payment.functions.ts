@@ -31,6 +31,10 @@ export const getPaymentConfig = createServerFn({ method: "GET" })
       alipay_appid: "", alipay_appsecret: "", alipay_enabled: false,
       api_endpoint: "https://api.xunhupay.com/payment/do.html",
       notify_base_url: "",
+      wechat_provider: "xunhu", alipay_provider: "xunhu",
+      official_wechat_app_id: "", official_wechat_mch_id: "", official_wechat_serial_no: "",
+      official_wechat_private_key: "", official_wechat_api_v3_key: "", official_wechat_platform_public_key: "",
+      official_alipay_app_id: "", official_alipay_private_key: "", official_alipay_public_key: "",
     };
   });
 
@@ -49,6 +53,17 @@ export const setPaymentConfig = createServerFn({ method: "POST" })
         (v) => v === "" || /^https?:\/\//i.test(v),
         "回调域名必须以 http(s):// 开头或留空",
       ),
+      wechat_provider: z.enum(["xunhu", "official"]),
+      alipay_provider: z.enum(["xunhu", "official"]),
+      official_wechat_app_id: z.string().trim().max(128),
+      official_wechat_mch_id: z.string().trim().max(64),
+      official_wechat_serial_no: z.string().trim().max(128),
+      official_wechat_private_key: z.string().trim().max(10000),
+      official_wechat_api_v3_key: z.string().trim().max(128),
+      official_wechat_platform_public_key: z.string().trim().max(10000),
+      official_alipay_app_id: z.string().trim().max(128),
+      official_alipay_private_key: z.string().trim().max(10000),
+      official_alipay_public_key: z.string().trim().max(10000),
     }).parse(input),
   )
   .handler(async ({ data, context }) => {

@@ -60,6 +60,10 @@ function AdminPage() {
     alipay_appid: "", alipay_appsecret: "", alipay_enabled: false,
     api_endpoint: "https://api.xunhupay.com/payment/do.html",
     notify_base_url: "",
+    wechat_provider: "xunhu" as "xunhu" | "official", alipay_provider: "xunhu" as "xunhu" | "official",
+    official_wechat_app_id: "", official_wechat_mch_id: "", official_wechat_serial_no: "",
+    official_wechat_private_key: "", official_wechat_api_v3_key: "", official_wechat_platform_public_key: "",
+    official_alipay_app_id: "", official_alipay_private_key: "", official_alipay_public_key: "",
   });
   const [showWxSecret, setShowWxSecret] = useState(false);
   const [showAliSecret, setShowAliSecret] = useState(false);
@@ -140,6 +144,17 @@ function AdminPage() {
       alipay_enabled: !!r.alipay_enabled,
       api_endpoint: r.api_endpoint || "https://api.xunhupay.com/payment/do.html",
       notify_base_url: r.notify_base_url || "",
+      wechat_provider: r.wechat_provider === "official" ? "official" : "xunhu",
+      alipay_provider: r.alipay_provider === "official" ? "official" : "xunhu",
+      official_wechat_app_id: r.official_wechat_app_id || "",
+      official_wechat_mch_id: r.official_wechat_mch_id || "",
+      official_wechat_serial_no: r.official_wechat_serial_no || "",
+      official_wechat_private_key: r.official_wechat_private_key || "",
+      official_wechat_api_v3_key: r.official_wechat_api_v3_key || "",
+      official_wechat_platform_public_key: r.official_wechat_platform_public_key || "",
+      official_alipay_app_id: r.official_alipay_app_id || "",
+      official_alipay_private_key: r.official_alipay_private_key || "",
+      official_alipay_public_key: r.official_alipay_public_key || "",
     })).catch(() => {});
     reloadProducts().catch(() => {});
     reloadOrders().catch(() => {});
@@ -608,8 +623,8 @@ function AdminPage() {
               </section>
 
               <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-                <h2 className="text-base font-bold mb-1">支付配置（虎皮椒）</h2>
-                <p className="text-xs text-slate-400 mb-3">填写虎皮椒商户号 (appid) 与密钥 (appsecret)，开启对应渠道后用户即可使用扫码 / H5 跳转支付。</p>
+                <h2 className="text-base font-bold mb-1">支付配置（虎皮椒 / 官方商户）</h2>
+                <p className="text-xs text-slate-400 mb-3">微信、支付宝可分别选择虎皮椒或官方商户，保留原虎皮椒配置随时切换。</p>
                 <div className="grid md:grid-cols-2 gap-4">
                   <div className="rounded-lg border border-slate-800 p-4">
                     <div className="flex items-center justify-between mb-2">
@@ -619,6 +634,11 @@ function AdminPage() {
                         启用
                       </label>
                     </div>
+                    <label className="block text-xs text-slate-400 mb-1">支付渠道</label>
+                    <select value={payCfg.wechat_provider} onChange={(e) => setPayCfg({ ...payCfg, wechat_provider: e.target.value as "xunhu" | "official" })} className="w-full mb-3 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm">
+                      <option value="xunhu">虎皮椒</option><option value="official">微信支付官方商户（Native）</option>
+                    </select>
+                    {payCfg.wechat_provider === "xunhu" ? <>
                     <label className="block text-xs text-slate-400 mb-1">商户号 (appid)</label>
                     <input value={payCfg.wechat_appid} onChange={(e) => setPayCfg({ ...payCfg, wechat_appid: e.target.value })}
                       placeholder="微信 appid" className="w-full mb-2 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500" />
@@ -628,6 +648,14 @@ function AdminPage() {
                         placeholder="微信 appsecret" className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500" />
                       <button type="button" onClick={() => setShowWxSecret((s) => !s)} className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs">{showWxSecret ? "隐藏" : "显示"}</button>
                     </div>
+                    </> : <div className="space-y-2">
+                      <input value={payCfg.official_wechat_app_id} onChange={e => setPayCfg({...payCfg, official_wechat_app_id:e.target.value})} placeholder="公众号/应用 AppID" className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm font-mono" />
+                      <input value={payCfg.official_wechat_mch_id} onChange={e => setPayCfg({...payCfg, official_wechat_mch_id:e.target.value})} placeholder="微信支付商户号 mchid" className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm font-mono" />
+                      <input value={payCfg.official_wechat_serial_no} onChange={e => setPayCfg({...payCfg, official_wechat_serial_no:e.target.value})} placeholder="商户 API 证书序列号" className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm font-mono" />
+                      <input type="password" value={payCfg.official_wechat_api_v3_key} onChange={e => setPayCfg({...payCfg, official_wechat_api_v3_key:e.target.value})} placeholder="API v3 密钥（32位）" className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm font-mono" />
+                      <textarea rows={4} value={payCfg.official_wechat_private_key} onChange={e => setPayCfg({...payCfg, official_wechat_private_key:e.target.value})} placeholder="商户私钥 PEM" className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs font-mono" />
+                      <textarea rows={4} value={payCfg.official_wechat_platform_public_key} onChange={e => setPayCfg({...payCfg, official_wechat_platform_public_key:e.target.value})} placeholder="微信支付公钥/平台证书公钥 PEM" className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs font-mono" />
+                    </div>}
                   </div>
 
                   <div className="rounded-lg border border-slate-800 p-4">
@@ -638,6 +666,11 @@ function AdminPage() {
                         启用
                       </label>
                     </div>
+                    <label className="block text-xs text-slate-400 mb-1">支付渠道</label>
+                    <select value={payCfg.alipay_provider} onChange={(e) => setPayCfg({ ...payCfg, alipay_provider: e.target.value as "xunhu" | "official" })} className="w-full mb-3 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm">
+                      <option value="xunhu">虎皮椒</option><option value="official">支付宝官方商户（当面付）</option>
+                    </select>
+                    {payCfg.alipay_provider === "xunhu" ? <>
                     <label className="block text-xs text-slate-400 mb-1">商户号 (appid)</label>
                     <input value={payCfg.alipay_appid} onChange={(e) => setPayCfg({ ...payCfg, alipay_appid: e.target.value })}
                       placeholder="支付宝 appid" className="w-full mb-2 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500" />
@@ -647,6 +680,11 @@ function AdminPage() {
                         placeholder="支付宝 appsecret" className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm font-mono focus:outline-none focus:border-pink-500" />
                       <button type="button" onClick={() => setShowAliSecret((s) => !s)} className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs">{showAliSecret ? "隐藏" : "显示"}</button>
                     </div>
+                    </> : <div className="space-y-2">
+                      <input value={payCfg.official_alipay_app_id} onChange={e => setPayCfg({...payCfg, official_alipay_app_id:e.target.value})} placeholder="支付宝开放平台 AppID" className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm font-mono" />
+                      <textarea rows={5} value={payCfg.official_alipay_private_key} onChange={e => setPayCfg({...payCfg, official_alipay_private_key:e.target.value})} placeholder="应用私钥 PEM（不是应用公钥）" className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs font-mono" />
+                      <textarea rows={5} value={payCfg.official_alipay_public_key} onChange={e => setPayCfg({...payCfg, official_alipay_public_key:e.target.value})} placeholder="支付宝公钥 PEM（不是应用公钥）" className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs font-mono" />
+                    </div>}
                   </div>
                 </div>
                 <div className="mt-3">

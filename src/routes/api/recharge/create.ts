@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 import { createXunhupayOrder, type Channel, type XunhupayConfig } from "@/lib/xunhupay.server";
+import { createOfficialAlipay, createOfficialWechat } from "@/lib/official-payment.server";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -86,7 +87,8 @@ export const Route = createFileRoute("/api/recharge/create")({
           // 优先使用后台配置的 notify_base_url（应为发布域名，如 https://jiexi520.lovable.app）
           // 因为 lovable 预览域名 id-preview--*.lovable.app 会强制重定向到登录页，外部回调进不来
           const notifyBase = ((cfgRow as any).notify_base_url || "").replace(/\/+$/, "") || requestOrigin;
-          const notifyUrl = `${notifyBase}/api/public/xunhupay-notify`;
+          const provider = (channel === "wechat" ? (cfgRow as any).wechat_provider : (cfgRow as any).alipay_provider) === "official" ? "official" : "xunhu";
+          const notifyUrl = provider === "official" ? `${notifyBase}/api/public/official-payment-notify?channel=${channel}` : `${notifyBase}/api/public/xunhupay-notify`;
           const returnUrl = `${requestOrigin}/?recharge=${orderNo}`;
 
           const clientIp =
@@ -96,7 +98,11 @@ export const Route = createFileRoute("/api/recharge/create")({
 
           let upstream;
           try {
-            upstream = await createXunhupayOrder({
+            upstream = provider === "official"
+              ? (channel === "alipay"
+                ? await createOfficialAlipay(cfgRow as any, { orderNo, amountCents: amount, title: product.name, notifyUrl })
+                : await createOfficialWechat(cfgRow as any, { orderNo, amountCents: amount, title: product.name, notifyUrl }))
+              : await createXunhupayOrder({
               cfg,
               channel: channel as Channel,
               orderNo,
@@ -105,7 +111,7 @@ export const Route = createFileRoute("/api/recharge/create")({
               notifyUrl,
               returnUrl,
               clientIp,
-            });
+              });
           } catch (e: any) {
             return json({ error: e?.message || "下单失败" }, 502);
           }
@@ -118,6 +124,7 @@ export const Route = createFileRoute("/api/recharge/create")({
             credits: product.credits,
             amount,
             channel,
+            provider,
             status: "pending",
             qr_url: upstream.qr_url,
             wap_url: upstream.wap_url,

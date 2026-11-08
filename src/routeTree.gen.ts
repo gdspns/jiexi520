@@ -20,6 +20,7 @@ import { Route as ApiRechargeProductsRouteImport } from './routes/api/recharge/p
 import { Route as ApiRechargeCreateRouteImport } from './routes/api/recharge/create'
 import { Route as ApiPublicXunhupayNotifyRouteImport } from './routes/api/public/xunhupay-notify'
 import { Route as ApiPublicVideoCompatRouteImport } from './routes/api/public/video-compat'
+import { Route as ApiPublicOfficialPaymentNotifyRouteImport } from './routes/api/public/official-payment-notify'
 import { Route as ApiPublicMediaStreamRouteImport } from './routes/api/public/media-stream'
 import { Route as ApiPublicMediaProxyRouteImport } from './routes/api/public/media-proxy'
 import { Route as ApiPublicAuthTokenRouteImport } from './routes/api/public/auth-token'
@@ -78,6 +79,12 @@ const ApiPublicVideoCompatRoute = ApiPublicVideoCompatRouteImport.update({
   path: '/api/public/video-compat',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicOfficialPaymentNotifyRoute =
+  ApiPublicOfficialPaymentNotifyRouteImport.update({
+    id: '/api/public/official-payment-notify',
+    path: '/api/public/official-payment-notify',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicMediaStreamRoute = ApiPublicMediaStreamRouteImport.update({
   id: '/api/public/media-stream',
   path: '/api/public/media-stream',
@@ -103,6 +110,7 @@ export interface FileRoutesByFullPath {
   '/api/public/auth-token': typeof ApiPublicAuthTokenRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
+  '/api/public/official-payment-notify': typeof ApiPublicOfficialPaymentNotifyRoute
   '/api/public/video-compat': typeof ApiPublicVideoCompatRoute
   '/api/public/xunhupay-notify': typeof ApiPublicXunhupayNotifyRoute
   '/api/recharge/create': typeof ApiRechargeCreateRoute
@@ -118,6 +126,7 @@ export interface FileRoutesByTo {
   '/api/public/auth-token': typeof ApiPublicAuthTokenRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
+  '/api/public/official-payment-notify': typeof ApiPublicOfficialPaymentNotifyRoute
   '/api/public/video-compat': typeof ApiPublicVideoCompatRoute
   '/api/public/xunhupay-notify': typeof ApiPublicXunhupayNotifyRoute
   '/api/recharge/create': typeof ApiRechargeCreateRoute
@@ -135,6 +144,7 @@ export interface FileRoutesById {
   '/api/public/auth-token': typeof ApiPublicAuthTokenRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
+  '/api/public/official-payment-notify': typeof ApiPublicOfficialPaymentNotifyRoute
   '/api/public/video-compat': typeof ApiPublicVideoCompatRoute
   '/api/public/xunhupay-notify': typeof ApiPublicXunhupayNotifyRoute
   '/api/recharge/create': typeof ApiRechargeCreateRoute
@@ -152,6 +162,7 @@ export interface FileRouteTypes {
     | '/api/public/auth-token'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
+    | '/api/public/official-payment-notify'
     | '/api/public/video-compat'
     | '/api/public/xunhupay-notify'
     | '/api/recharge/create'
@@ -167,6 +178,7 @@ export interface FileRouteTypes {
     | '/api/public/auth-token'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
+    | '/api/public/official-payment-notify'
     | '/api/public/video-compat'
     | '/api/public/xunhupay-notify'
     | '/api/recharge/create'
@@ -183,6 +195,7 @@ export interface FileRouteTypes {
     | '/api/public/auth-token'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
+    | '/api/public/official-payment-notify'
     | '/api/public/video-compat'
     | '/api/public/xunhupay-notify'
     | '/api/recharge/create'
@@ -199,6 +212,7 @@ export interface RootRouteChildren {
   ApiPublicAuthTokenRoute: typeof ApiPublicAuthTokenRoute
   ApiPublicMediaProxyRoute: typeof ApiPublicMediaProxyRoute
   ApiPublicMediaStreamRoute: typeof ApiPublicMediaStreamRoute
+  ApiPublicOfficialPaymentNotifyRoute: typeof ApiPublicOfficialPaymentNotifyRoute
   ApiPublicVideoCompatRoute: typeof ApiPublicVideoCompatRoute
   ApiPublicXunhupayNotifyRoute: typeof ApiPublicXunhupayNotifyRoute
   ApiRechargeCreateRoute: typeof ApiRechargeCreateRoute
@@ -285,6 +299,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicVideoCompatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/official-payment-notify': {
+      id: '/api/public/official-payment-notify'
+      path: '/api/public/official-payment-notify'
+      fullPath: '/api/public/official-payment-notify'
+      preLoaderRoute: typeof ApiPublicOfficialPaymentNotifyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/media-stream': {
       id: '/api/public/media-stream'
       path: '/api/public/media-stream'
@@ -330,6 +351,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicAuthTokenRoute: ApiPublicAuthTokenRoute,
   ApiPublicMediaProxyRoute: ApiPublicMediaProxyRoute,
   ApiPublicMediaStreamRoute: ApiPublicMediaStreamRoute,
+  ApiPublicOfficialPaymentNotifyRoute: ApiPublicOfficialPaymentNotifyRoute,
   ApiPublicVideoCompatRoute: ApiPublicVideoCompatRoute,
   ApiPublicXunhupayNotifyRoute: ApiPublicXunhupayNotifyRoute,
   ApiRechargeCreateRoute: ApiRechargeCreateRoute,

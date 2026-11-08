@@ -70,6 +70,10 @@ export type Database = {
           alipay_appid: string
           alipay_appsecret: string
           alipay_enabled: boolean
+          alipay_provider: string
+          official_alipay_app_id: string
+          official_alipay_private_key: string
+          official_alipay_public_key: string
           api_endpoint: string
           key: string
           notify_base_url: string
@@ -77,11 +81,22 @@ export type Database = {
           wechat_appid: string
           wechat_appsecret: string
           wechat_enabled: boolean
+          wechat_provider: string
+          official_wechat_app_id: string
+          official_wechat_mch_id: string
+          official_wechat_serial_no: string
+          official_wechat_private_key: string
+          official_wechat_api_v3_key: string
+          official_wechat_platform_public_key: string
         }
         Insert: {
           alipay_appid?: string
           alipay_appsecret?: string
           alipay_enabled?: boolean
+          alipay_provider?: string
+          official_alipay_app_id?: string
+          official_alipay_private_key?: string
+          official_alipay_public_key?: string
           api_endpoint?: string
           key?: string
           notify_base_url?: string
@@ -89,11 +104,22 @@ export type Database = {
           wechat_appid?: string
           wechat_appsecret?: string
           wechat_enabled?: boolean
+          wechat_provider?: string
+          official_wechat_app_id?: string
+          official_wechat_mch_id?: string
+          official_wechat_serial_no?: string
+          official_wechat_private_key?: string
+          official_wechat_api_v3_key?: string
+          official_wechat_platform_public_key?: string
         }
         Update: {
           alipay_appid?: string
           alipay_appsecret?: string
           alipay_enabled?: boolean
+          alipay_provider?: string
+          official_alipay_app_id?: string
+          official_alipay_private_key?: string
+          official_alipay_public_key?: string
           api_endpoint?: string
           key?: string
           notify_base_url?: string
@@ -101,6 +127,13 @@ export type Database = {
           wechat_appid?: string
           wechat_appsecret?: string
           wechat_enabled?: boolean
+          wechat_provider?: string
+          official_wechat_app_id?: string
+          official_wechat_mch_id?: string
+          official_wechat_serial_no?: string
+          official_wechat_private_key?: string
+          official_wechat_api_v3_key?: string
+          official_wechat_platform_public_key?: string
         }
         Relationships: []
       }
@@ -114,6 +147,7 @@ export type Database = {
           id: string
           order_no: string
           paid_at: string | null
+          provider: string
           product_id: string | null
           product_name: string
           qr_url: string | null
@@ -131,6 +165,7 @@ export type Database = {
           id?: string
           order_no: string
           paid_at?: string | null
+          provider?: string
           product_id?: string | null
           product_name: string
           qr_url?: string | null
@@ -148,6 +183,7 @@ export type Database = {
           id?: string
           order_no?: string
           paid_at?: string | null
+          provider?: string
           product_id?: string | null
           product_name?: string
           qr_url?: string | null
