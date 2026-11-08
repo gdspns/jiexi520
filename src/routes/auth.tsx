@@ -8,8 +8,8 @@ export const Route = createFileRoute("/auth")({
   component: AuthPage,
 });
 
-type Mode = "login" | "signup";
-type SignupStep = "email" | "code" | "password";
+type Mode = "login" | "signup" | "forgot";
+type Step = "email" | "code" | "password";
 
 // 注册仅开放腾讯 / 网易 163 / 新浪邮箱，挡掉临时邮箱与垃圾注册。
 // 服务端还有一层 Before User Created Hook（数据库函数）做硬校验，这里只负责提前给提示。
@@ -29,12 +29,15 @@ function isAllowedEmail(email: string) {
   return ALLOWED_EMAIL_DOMAINS.includes(domain);
 }
 
+const STEP_LABEL = { email: "邮箱", code: "验证码", password: "密码" } as const;
+const STEP_ORDER = { email: 0, code: 1, password: 2 } as const;
+
 function AuthPage() {
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
-  const [step, setStep] = useState<SignupStep>("email");
+  const [step, setStep] = useState<Step>("email");
   const [cooldown, setCooldown] = useState(0);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -49,7 +52,11 @@ function AuthPage() {
     };
   }, [cooldown]);
 
-  const resetSignup = () => {
+  const isSignup = mode === "signup";
+  const isForgot = mode === "forgot";
+  const isFlow = isSignup || isForgot;
+
+  const resetCodeFlow = () => {
     setStep("email");
     setCode("");
     setPassword("");
@@ -62,10 +69,10 @@ function AuthPage() {
     setMode(next);
     setErr(null);
     setMsg(null);
-    resetSignup();
+    resetCodeFlow();
   };
 
-  // 注册第一步：给邮箱发送 6 位验证码（Supabase Auth OTP）
+  // 发送验证码：注册走 signInWithOtp（新用户），找回密码走 resetPasswordForEmail（已有用户）
   const sendCode = async () => {
     setErr(null);
     setMsg(null);
@@ -74,20 +81,28 @@ function AuthPage() {
       setErr("请输入正确的邮箱地址");
       return;
     }
-    if (!isAllowedEmail(addr)) {
+    if (isSignup && !isAllowedEmail(addr)) {
       setErr("仅支持 QQ 邮箱、163 邮箱、新浪邮箱注册，请更换邮箱后再试");
       return;
     }
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: addr,
-        options: { shouldCreateUser: true },
-      });
-      if (error) throw error;
+      if (isSignup) {
+        const { error } = await supabase.auth.signInWithOtp({
+          email: addr,
+          options: { shouldCreateUser: true },
+        });
+        if (error) throw error;
+        setMsg(`验证码已发送到 ${addr}，请查收（含垃圾箱），10 分钟内有效。`);
+      } else {
+        const { error } = await supabase.auth.resetPasswordForEmail(addr, {
+          redirectTo: window.location.origin + "/auth",
+        });
+        if (error) throw error;
+        setMsg(`如果 ${addr} 已注册，重置验证码已发送，请查收（含垃圾箱），10 分钟内有效。`);
+      }
       setStep("code");
       setCooldown(60);
-      setMsg(`验证码已发送到 ${addr}，请查收（含垃圾箱），10 分钟内有效。`);
     } catch (e: any) {
       const text = String(e?.message || "");
       if (/仅支持/.test(text)) setErr(text);
@@ -99,7 +114,7 @@ function AuthPage() {
     }
   };
 
-  // 注册第二步：校验验证码，通过后即完成邮箱验证并登录
+  // 校验验证码：注册用 email 类型，找回密码用 recovery 类型
   const verifyCode = async () => {
     setErr(null);
     setMsg(null);
@@ -111,13 +126,17 @@ function AuthPage() {
     setLoading(true);
     try {
       const { error } = await supabase.auth.verifyOtp({
-        email: email.trim(),
+        email: email.trim().toLowerCase(),
         token,
-        type: "email",
+        type: isSignup ? "email" : "recovery",
       });
       if (error) throw error;
       setStep("password");
-      setMsg("邮箱验证成功！再设置一个密码即可用密码登录（已有账号可直接跳过）。");
+      setMsg(
+        isSignup
+          ? "邮箱验证成功！再设置一个密码即可用密码登录（已有账号可直接跳过）。"
+          : "验证成功！请设置新密码。",
+      );
     } catch (e: any) {
       const text = String(e?.message || "");
       if (/expired|invalid|token/i.test(text)) setErr("验证码错误或已过期，请重新获取");
@@ -127,11 +146,19 @@ function AuthPage() {
     }
   };
 
-  // 注册第三步：设置密码（可选），完成后进入站点
-  const finishSignup = async (skipPassword = false) => {
+  const goHome = async (text: string) => {
+    const sp = new URLSearchParams(window.location.search);
+    const redirect = sp.get("redirect") || "/index.html";
+    setMsg(text);
+    await new Promise((r) => window.setTimeout(r, 700));
+    window.location.replace(redirect);
+  };
+
+  // 注册第三步：设置密码（可跳过）；找回密码第三步：必须设置新密码
+  const finishPassword = async (skip = false) => {
     setErr(null);
     setMsg(null);
-    if (!skipPassword) {
+    if (!skip) {
       if (password.length < 6) {
         setErr("密码至少 6 位");
         return;
@@ -146,32 +173,29 @@ function AuthPage() {
         return;
       }
       setLoading(false);
+      if (isForgot) {
+        // 重置完直接以新密码登录，省一次输入
+        await goHome("密码已重置，正在进入站点…");
+        return;
+      }
     }
-    const sp = new URLSearchParams(window.location.search);
-    const redirect = sp.get("redirect") || "/index.html";
-    setMsg("注册完成，即将进入站点…");
-    await new Promise((r) => window.setTimeout(r, 700));
-    window.location.replace(redirect);
+    await goHome(isSignup ? "注册完成，即将进入站点…" : "密码已重置，正在进入站点…");
   };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
     setMsg(null);
-    if (mode === "signup") {
+    if (isFlow) {
       if (step === "email") return sendCode();
       if (step === "code") return verifyCode();
-      return finishSignup();
+      return finishPassword();
     }
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      const { error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
       if (error) throw error;
-      setMsg("登录成功，即将返回首页…");
-      const sp = new URLSearchParams(window.location.search);
-      const redirect = sp.get("redirect") || "/index.html";
-      await new Promise((resolve) => window.setTimeout(resolve, 900));
-      window.location.replace(redirect);
+      await goHome("登录成功，即将返回首页…");
     } catch (e: any) {
       setErr(e?.message || "操作失败");
     } finally {
@@ -179,24 +203,34 @@ function AuthPage() {
     }
   };
 
-  const isSignup = mode === "signup";
   const submitLabel = loading
     ? "处理中..."
-    : !isSignup
+    : mode === "login"
       ? "登录"
       : step === "email"
         ? "发送验证码"
         : step === "code"
-          ? "验证并注册"
-          : "完成注册";
+          ? isForgot
+            ? "验证并重置"
+            : "验证并注册"
+          : isForgot
+            ? "保存新密码"
+            : "完成注册";
 
-  const stepHint = !isSignup
-    ? "登录以使用解析与本地转换功能"
-    : step === "email"
-      ? "输入邮箱，我们会发送 6 位验证码"
-      : step === "code"
-        ? "填写邮箱收到的验证码"
-        : "设置登录密码";
+  const stepHint =
+    mode === "login"
+      ? "登录以使用解析与本地转换功能"
+      : isSignup
+        ? step === "email"
+          ? "输入邮箱，我们会发送 6 位验证码"
+          : step === "code"
+            ? "填写邮箱收到的验证码"
+            : "设置登录密码"
+        : step === "email"
+          ? "输入注册邮箱，我们会发送重置验证码"
+          : step === "code"
+            ? "填写邮箱收到的重置验证码"
+            : "设置新密码";
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4" style={{ background: "linear-gradient(135deg,#0f172a,#1e1b4b)" }}>
@@ -204,19 +238,14 @@ function AuthPage() {
         <h1 className="text-2xl font-bold text-white text-center mb-1">音影无损</h1>
         <p className="text-sm text-slate-400 text-center mb-2">{stepHint}</p>
 
-        {/* 注册进度：邮箱 → 验证码 → 密码 */}
-        {isSignup && (
+        {/* 进度：邮箱 → 验证码 → 密码 */}
+        {isFlow && (
           <div className="mb-6 flex items-center justify-center gap-2 text-[11px]">
-            {[
-              { key: "email", label: "邮箱" },
-              { key: "code", label: "验证码" },
-              { key: "password", label: "密码" },
-            ].map((s, i) => {
-              const order = { email: 0, code: 1, password: 2 } as const;
-              const done = order[step] > i;
-              const active = order[step] === i;
+            {(["email", "code", "password"] as Step[]).map((s, i) => {
+              const done = STEP_ORDER[step] > i;
+              const active = STEP_ORDER[step] === i;
               return (
-                <div key={s.key} className="flex items-center gap-2">
+                <div key={s} className="flex items-center gap-2">
                   <span
                     className={
                       "px-2.5 py-1 rounded-full border " +
@@ -228,7 +257,7 @@ function AuthPage() {
                     }
                   >
                     {done ? "✓ " : ""}
-                    {s.label}
+                    {STEP_LABEL[s]}
                   </span>
                   {i < 2 && <span className="text-slate-600">→</span>}
                 </div>
@@ -245,11 +274,11 @@ function AuthPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              disabled={isSignup && step !== "email"}
+              disabled={isFlow && step !== "email"}
               className="mt-1 w-full px-4 py-3 rounded-lg bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-pink-500 disabled:opacity-60"
               placeholder={isSignup ? "QQ / 163 / 新浪 邮箱" : "you@example.com"}
             />
-            {isSignup && (
+            {isSignup && step === "email" && (
               <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
                 仅支持 <span className="text-slate-300">QQ 邮箱（qq.com / foxmail.com）</span>、
                 <span className="text-slate-300">163 邮箱</span>、
@@ -258,8 +287,14 @@ function AuthPage() {
             )}
           </div>
 
+          {isForgot && step === "email" && (
+            <div className="text-[11px] leading-relaxed text-slate-500">
+              忘记密码只需邮箱验证码，验证通过后可直接设置新密码，无需原密码。
+            </div>
+          )}
+
           {/* 验证码步骤 */}
-          {isSignup && step === "code" && (
+          {isFlow && step === "code" && (
             <div>
               <label className="text-xs text-slate-400">验证码</label>
               <input
@@ -281,20 +316,29 @@ function AuthPage() {
                 >
                   {cooldown > 0 ? `${cooldown}s 后可重新发送` : "重新发送验证码"}
                 </button>
-                <button type="button" onClick={resetSignup} className="text-slate-400 hover:text-slate-200">
+                <button type="button" onClick={resetCodeFlow} className="text-slate-400 hover:text-slate-200">
                   换个邮箱
                 </button>
               </div>
             </div>
           )}
 
-          {/* 密码步骤（注册）或普通登录密码 */}
-          {(!isSignup || step === "password") && (
+          {/* 密码步骤（注册/重置）或普通登录密码 */}
+          {mode === "login" ? (
             <div>
-              <label className="text-xs text-slate-400">密码{isSignup ? "（可选，跳过则用验证码登录）" : ""}</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-slate-400">密码</label>
+                <button
+                  type="button"
+                  onClick={() => switchMode("forgot")}
+                  className="text-xs text-pink-400 hover:underline"
+                >
+                  忘记密码？
+                </button>
+              </div>
               <input
                 type="password"
-                required={!isSignup}
+                required
                 minLength={6}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -302,6 +346,22 @@ function AuthPage() {
                 placeholder="至少 6 位"
               />
             </div>
+          ) : (
+            step === "password" && (
+              <div>
+                <label className="text-xs text-slate-400">
+                  {isForgot ? "新密码" : "密码（可选，跳过则用验证码登录）"}
+                </label>
+                <input
+                  type="password"
+                  minLength={6}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="mt-1 w-full px-4 py-3 rounded-lg bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-pink-500"
+                  placeholder="至少 6 位"
+                />
+              </div>
+            )
           )}
 
           {err && <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded p-2">{err}</div>}
@@ -318,7 +378,7 @@ function AuthPage() {
           {isSignup && step === "password" && (
             <button
               type="button"
-              onClick={() => finishSignup(true)}
+              onClick={() => finishPassword(true)}
               disabled={loading}
               className="w-full py-2.5 rounded-lg text-sm text-slate-300 border border-slate-700 hover:bg-slate-800 disabled:opacity-60 transition"
             >
@@ -328,10 +388,12 @@ function AuthPage() {
         </form>
 
         <div className="mt-6 text-center text-sm text-slate-400">
-          {!isSignup ? (
+          {mode === "login" ? (
             <>还没有账号？ <button onClick={() => switchMode("signup")} className="text-pink-400 hover:underline">立即注册</button></>
-          ) : (
+          ) : mode === "signup" ? (
             <>已有账号？ <button onClick={() => switchMode("login")} className="text-pink-400 hover:underline">去登录</button></>
+          ) : (
+            <>想起来了？ <button onClick={() => switchMode("login")} className="text-pink-400 hover:underline">返回登录</button></>
           )}
         </div>
         <div className="mt-4 text-center">
