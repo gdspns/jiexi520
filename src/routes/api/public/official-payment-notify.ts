@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { decryptWechatResource, verifyAlipayCallback, verifyWechatCallback } from "@/lib/official-payment.server";
 
 async function fulfill(orderNo: string, amountCents: number, tradeId: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -18,6 +17,7 @@ export const Route = createFileRoute("/api/public/official-payment-notify")({
     try {
       const channel = new URL(request.url).searchParams.get("channel");
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { decryptWechatResource, verifyAlipayCallback, verifyWechatCallback } = await import("@/lib/official-payment.server");
       const { data: cfg } = await supabaseAdmin.from("payment_config").select("*").eq("key", "default").maybeSingle();
       if (!cfg) return new Response("config missing", { status: 500 });
       if (channel === "alipay") {

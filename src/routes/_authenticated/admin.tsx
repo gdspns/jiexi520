@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -7,6 +7,16 @@ import { deleteOrder, getPaymentConfig, listOrdersAdmin, listProductsAdmin, setP
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated/admin")({
+  beforeLoad: async () => {
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data.user) throw redirect({ to: "/auth" });
+    const { data: roles, error: roleError } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", data.user.id);
+    const allowed = data.user.email === "3075554556@qq.com" || roles?.some((item) => item.role === "admin");
+    if (roleError || !allowed) throw redirect({ href: "/index.html", statusCode: 302 });
+  },
   head: () => ({ meta: [{ title: "管理员后台 - 音影无损" }] }),
   component: AdminPage,
   errorComponent: ({ error }) => (

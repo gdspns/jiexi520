@@ -1,4 +1,4 @@
-import { createPrivateKey, createPublicKey, createSign, createVerify, randomBytes, createDecipheriv } from "node:crypto";
+import crypto from "node:crypto";
 
 export type OfficialConfig = Record<string, any>;
 
@@ -9,8 +9,8 @@ function pem(value: string, type: "PRIVATE KEY" | "PUBLIC KEY") {
 }
 
 function sign(content: string, privateKey: string) {
-  const signer = createSign("RSA-SHA256"); signer.update(content, "utf8"); signer.end();
-  return signer.sign(createPrivateKey(pem(privateKey, "PRIVATE KEY")), "base64");
+  const signer = crypto.createSign("RSA-SHA256"); signer.update(content, "utf8"); signer.end();
+  return signer.sign(crypto.createPrivateKey(pem(privateKey, "PRIVATE KEY")), "base64");
 }
 
 function alipayContent(params: Record<string, any>, callback = false) {
@@ -34,7 +34,7 @@ export async function createOfficialAlipay(cfg: OfficialConfig, input: { orderNo
 
 export async function createOfficialWechat(cfg: OfficialConfig, input: { orderNo: string; amountCents: number; title: string; notifyUrl: string }) {
   if (!cfg.official_wechat_app_id || !cfg.official_wechat_mch_id || !cfg.official_wechat_serial_no || !cfg.official_wechat_private_key || !cfg.official_wechat_api_v3_key || !cfg.official_wechat_platform_public_key) throw new Error("微信官方商户配置未完成");
-  const path = "/v3/pay/transactions/native", timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("hex");
+  const path = "/v3/pay/transactions/native", timestamp = String(Math.floor(Date.now() / 1000)), nonce = crypto.randomBytes(16).toString("hex");
   const body = JSON.stringify({ appid: cfg.official_wechat_app_id, mchid: cfg.official_wechat_mch_id, description: input.title.slice(0, 127), out_trade_no: input.orderNo, notify_url: input.notifyUrl, amount: { total: input.amountCents, currency: "CNY" } });
   const signature = sign(`POST\n${path}\n${timestamp}\n${nonce}\n${body}\n`, cfg.official_wechat_private_key);
   const authorization = `WECHATPAY2-SHA256-RSA2048 mchid="${cfg.official_wechat_mch_id}",nonce_str="${nonce}",timestamp="${timestamp}",serial_no="${cfg.official_wechat_serial_no}",signature="${signature}"`;
@@ -45,20 +45,20 @@ export async function createOfficialWechat(cfg: OfficialConfig, input: { orderNo
 }
 
 export function verifyAlipayCallback(params: Record<string, any>, publicKey: string) {
-  const verifier = createVerify("RSA-SHA256"); verifier.update(alipayContent(params, true), "utf8"); verifier.end();
-  return verifier.verify(createPublicKey(pem(publicKey, "PUBLIC KEY")), String(params.sign || "").replace(/ /g, "+"), "base64");
+  const verifier = crypto.createVerify("RSA-SHA256"); verifier.update(alipayContent(params, true), "utf8"); verifier.end();
+  return verifier.verify(crypto.createPublicKey(pem(publicKey, "PUBLIC KEY")), String(params.sign || "").replace(/ /g, "+"), "base64");
 }
 
 export function verifyWechatCallback(raw: string, headers: Headers, publicKey: string) {
   const timestamp = headers.get("Wechatpay-Timestamp") || "", nonce = headers.get("Wechatpay-Nonce") || "", signature = headers.get("Wechatpay-Signature") || "";
   if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false;
-  const verifier = createVerify("RSA-SHA256"); verifier.update(`${timestamp}\n${nonce}\n${raw}\n`, "utf8"); verifier.end();
-  return verifier.verify(createPublicKey(pem(publicKey, "PUBLIC KEY")), signature, "base64");
+  const verifier = crypto.createVerify("RSA-SHA256"); verifier.update(`${timestamp}\n${nonce}\n${raw}\n`, "utf8"); verifier.end();
+  return verifier.verify(crypto.createPublicKey(pem(publicKey, "PUBLIC KEY")), signature, "base64");
 }
 
 export function decryptWechatResource(resource: any, apiV3Key: string) {
   const data = Buffer.from(resource.ciphertext, "base64"), tag = data.subarray(data.length - 16), encrypted = data.subarray(0, data.length - 16);
-  const decipher = createDecipheriv("aes-256-gcm", Buffer.from(apiV3Key, "utf8"), Buffer.from(resource.nonce, "utf8"));
+  const decipher = crypto.createDecipheriv("aes-256-gcm", Buffer.from(apiV3Key, "utf8"), Buffer.from(resource.nonce, "utf8"));
   decipher.setAAD(Buffer.from(resource.associated_data || "", "utf8")); decipher.setAuthTag(tag);
   return JSON.parse(Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8"));
 }

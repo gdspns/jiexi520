@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 import { createXunhupayOrder, type Channel, type XunhupayConfig } from "@/lib/xunhupay.server";
-import { createOfficialAlipay, createOfficialWechat } from "@/lib/official-payment.server";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -98,10 +97,13 @@ export const Route = createFileRoute("/api/recharge/create")({
 
           let upstream;
           try {
+            const official = provider === "official"
+              ? await import("@/lib/official-payment.server")
+              : null;
             upstream = provider === "official"
               ? (channel === "alipay"
-                ? await createOfficialAlipay(cfgRow as any, { orderNo, amountCents: amount, title: product.name, notifyUrl })
-                : await createOfficialWechat(cfgRow as any, { orderNo, amountCents: amount, title: product.name, notifyUrl }))
+                ? await official!.createOfficialAlipay(cfgRow as any, { orderNo, amountCents: amount, title: product.name, notifyUrl })
+                : await official!.createOfficialWechat(cfgRow as any, { orderNo, amountCents: amount, title: product.name, notifyUrl }))
               : await createXunhupayOrder({
               cfg,
               channel: channel as Channel,

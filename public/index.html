@@ -2266,7 +2266,7 @@
     <script type="module">
       import { createClient } from "https://esm.sh/@supabase/supabase-js@2.106.2";
       const SUPABASE_URL = window.location.origin + "/supabase";
-      const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNieGVub2ViaW5sbWRtYXFlbHl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0MDcyNzAsImV4cCI6MjA5NTk4MzI3MH0.s8NuyIZSkaVqkAm63RV3nrg60Jyiu9i4mPg13MxfGLU";
+      const SUPABASE_KEY = "sb_publishable_hDSQCrQWDGf0Jg4x_Rsy0g_EBxQ3Gln";
       const AUTH_STORAGE_KEY = "sb-jiexi520-auth-token";
       const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
         auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage: localStorage, storageKey: AUTH_STORAGE_KEY }
@@ -2446,6 +2446,12 @@
           refreshAuth();
         }
       });
+
+      // 管理员在后台调整次数后，首页无需手动刷新即可同步显示。
+      window.setInterval(() => {
+        if (currentUser && document.visibilityState === "visible") refreshAuth();
+      }, 3000);
+      window.addEventListener("focus", () => { if (currentUser) refreshAuth(); });
 
       function requireLogin(actionLabel) {
         if (currentUser) return true;
