@@ -252,6 +252,7 @@ async function fetchViaTunnel(
   headers: Record<string, string>,
   proxy: string,
   signal?: AbortSignal,
+  depth = 0,
 ): Promise<Response> {
   const proxyUrl = normalizeProxy(proxy);
   if (!proxyUrl) throw new Error("proxy scheme not supported by tunnel");
@@ -273,6 +274,19 @@ async function fetchViaTunnel(
       },
       async (upstream: any) => {
         try {
+          const status = upstream.statusCode || 200;
+          const location = upstream.headers?.location;
+          // googlevideo / TikTok 的 CDN 经常先用 302 把你指到另一台边缘机。
+          // node 的 http.request 不会自动跟随，以前这里直接当「坏状态」处理，
+          // 结果是退回 yt-dlp 管道：能播但不能拖、而且慢一倍。
+          // 手动跟 3 跳以内，跳转目标重新建隧道（可能换域名）。
+          if (status >= 300 && status < 400 && location && depth < 3) {
+            try { upstream.resume(); } catch (e) {}
+            let next = location;
+            try { next = new URL(location, directUrl).toString(); } catch (e) {}
+            resolve(await fetchViaTunnel(next, headers, proxy, signal, depth + 1));
+            return;
+          }
           const h = new Headers();
           for (const [k, v] of Object.entries(upstream.headers || {})) {
             if (v == null) continue;
@@ -280,7 +294,7 @@ async function fetchViaTunnel(
           }
           const { Readable } = await import("node:stream");
           const body = Readable.toWeb(upstream) as unknown as ReadableStream<Uint8Array>;
-          resolve(new Response(body, { status: upstream.statusCode || 200, headers: h }));
+          resolve(new Response(body, { status, headers: h }));
         } catch (err) {
           reject(err as Error);
         }
