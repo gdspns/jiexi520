@@ -67,7 +67,11 @@ RUN set -eux; \
 # postinstall would download (bun skips postinstall scripts by default).
 ENV YOUTUBE_DL_PATH=/usr/local/bin/yt-dlp
 
-COPY --from=deps /app/node_modules ./node_modules
+# 运行阶段不再需要 node_modules：nitro 的 node-server 产物已经把运行期依赖
+# 全部打进 .output/server（_libs/*.mjs），实测在完全没有 node_modules 的情况下
+# /、/index.html、/auth、/api/public/media-proxy 全部正常。
+# 少拷一份 node_modules 能让镜像从 ~1.09GB 降到 ~0.4GB，每次部署少写 0.7GB 磁盘，
+# 这正是之前服务器被撑到 98% 的主因。
 COPY --from=builder /app/.output ./.output
 COPY --from=builder /app/package.json ./package.json
 
