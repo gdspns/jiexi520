@@ -57,6 +57,9 @@
         html, body {
             overflow-x: hidden;
             max-width: 100vw;
+            /* manipulation = 允许滑动 + 双指缩放，但去掉双击放大。
+               手机端双指下拉看网页时，误触双击会把页面顶到 2 倍，回不去。 */
+            touch-action: manipulation;
         }
         *, *::before, *::after { box-sizing: border-box; }
         img, video { max-width: 100%; height: auto; }
@@ -1133,6 +1136,23 @@
             lastRefreshKey = '';
         }
         const isMobileLayout = () => window.matchMedia('(max-width: 640px)').matches;
+
+        // 手机端「双击放大」很烦：页面本来就按屏宽自适应，双击只会把某个区块顶成 2 倍
+        // 然后卡在那儿。iOS 13+ 靠上面 CSS 的 touch-action: manipulation 就够了，
+        // 老 WebKit / 部分国产浏览器不认，这里再兜一层；双指缩放不动，用户想放大还能放大。
+        (function killDoubleTapZoom() {
+            let lastEnd = 0, lastX = 0, lastY = 0;
+            document.addEventListener('touchend', (e) => {
+                if (e.touches && e.touches.length) return; // 双指还在屏幕上，是缩放，不管
+                const t = e.changedTouches && e.changedTouches[0];
+                const now = Date.now();
+                const near = !!t && Math.abs(t.clientX - lastX) < 30 && Math.abs(t.clientY - lastY) < 30;
+                if (now - lastEnd < 300 && near && e.cancelable) e.preventDefault();
+                lastEnd = now;
+                if (t) { lastX = t.clientX; lastY = t.clientY; }
+            }, { passive: false });
+            document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+        })();
         let batchResultsData = []; 
 
         // ================= 通用工具函数 =================
@@ -1517,7 +1537,11 @@
         //   4) 卡顿只就地续播，不轻易清空缓冲；
         //   5) 彻底失败给出明确出口（保存视频/重新解析），不再无限循环。
         const MobilePlayback = (() => {
-            const TIMEOUT = { direct: 4000, proxy: 11000, compat: 14000 };
+            // 海外链接第一次要走 yt-dlp 探直链，实测 12~20 秒（最慢 60 秒）。
+            // 以前 proxy 只给 11 秒，手机端冷链接必然「超时 → 换线路 → 失败」，
+            // 而网页端没有这个超时，所以「网页能播、手机不能播」。
+            // 现在：预热命中时 1~3 秒；未命中就给足 45 秒，并且状态文案说明在等什么。
+            const TIMEOUT = { direct: 4000, proxy: 45000, compat: 15000 };
             let video = null, stateEl = null, spinnerEl = null, statusEl = null, readyEl = null;
             let sources = [], index = 0, refreshUsed = 0, loadTimer = null;
             let resumeAt = 0, wantPlay = false, busy = false, bound = false;
@@ -1594,9 +1618,12 @@
                 const u = String(rawUrl || '');
                 const list = [];
                 if (!u) return list;
-                if (/^https?:\/\//i.test(u) && !brokenHosts.has(hostOf(u))) list.push({ kind: 'direct', url: u });
+                const absolute = /^https?:\/\//i.test(u);
+                if (absolute && !brokenHosts.has(hostOf(u))) list.push({ kind: 'direct', url: u });
                 list.push({ kind: 'proxy', url: proxifyVideo(u) });
-                list.push({ kind: 'compat', url: '/api/public/video-compat?url=' + encodeURIComponent(u) });
+                // 海外链接的 video_url 是站内 /api/public/media-stream，转码接口只接外链，
+                // 拼上去只会拿 400 再白等一轮超时。
+                if (absolute) list.push({ kind: 'compat', url: '/api/public/video-compat?url=' + encodeURIComponent(u) });
                 return list;
             }
 
@@ -1611,7 +1638,13 @@
                 if (!src) return fatal('视频线路不可用，请点“保存视频”下载后观看');
                 if (typeof opts.resume === 'number' && opts.resume > 0) resumeAt = opts.resume;
                 suspended = false;
-                setStatus(index === 0 ? '视频加载中…' : '正在切换线路…', { spinner: true });
+                const kind = (sources.find((x) => x && x.url === src.url) || src).kind;
+                setStatus(
+                    index > 0
+                        ? '正在切换线路…'
+                        : (kind === 'proxy' ? '正在通过代理服务器载入…（首次约 10 秒）' : '视频加载中…'),
+                    { spinner: true },
+                );
                 try { video.pause(); } catch (e) {}
                 video.controls = false;
                 video.preload = 'auto';
@@ -3106,6 +3139,24 @@
             singleUrlInput.value = ''; singleClearBtn.classList.add('hidden'); singleUrlInput.focus();
         });
 
+        // 海外平台解析本身就要 10~20 秒（yt-dlp 跑一遍），播放入口再去探一次直链，
+        // 等于让用户等两遍。点「开始解析」时先把这个直链缓存预热，
+        // 解析结果出来时播放器直接命中缓存，1~3 秒就能出画面。
+        const OVERSEAS_HOST_RE = /(youtube\.com|youtu\.be|tiktok\.com|instagram\.com|facebook\.com|fb\.watch|twitter\.com|x\.com|vimeo\.com)/i;
+        let warmAbort = null;
+        function warmOverseasStream(url) {
+            if (!OVERSEAS_HOST_RE.test(String(url || ''))) return;
+            try { if (warmAbort) warmAbort.abort(); } catch (e) {}
+            const controller = new AbortController();
+            warmAbort = controller;
+            const timer = setTimeout(() => controller.abort(), 60000);
+            const u = '/api/public/media-stream?type=video&url=' + encodeURIComponent(url);
+            fetch(u, { headers: { Range: 'bytes=0-1' }, cache: 'no-store', signal: controller.signal })
+                .then((res) => { try { if (res.body) res.body.cancel(); } catch (e) {} })
+                .catch(() => {})
+                .finally(() => clearTimeout(timer));
+        }
+
         let singleSubmitSeq = 0;
         singleForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -3116,6 +3167,7 @@
             const targetUrl = urls[urls.length - 1];
             if (urls.length > 1) showToast('检测到多个链接，已解析最新的一条', 'info');
             const seq = ++singleSubmitSeq;
+            warmOverseasStream(targetUrl);
 
             // 解析新链接前，先把上一条的一切清干净：
             // 播放器（含还没跑完的换链请求）、换链节流、当前数据。

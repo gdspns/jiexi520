@@ -325,6 +325,12 @@ function writeDirectCache(key: string, entry: Omit<DirectEntry, "expires">) {
 // 记住每个平台上次成功的策略，下次优先试，避免每次先跑一遍注定失败的策略
 const strategyHints = new Map<string, string>();
 
+// 同一个链接的并发探测合并：手机端 <video> 一次播放会并发发好几个 Range 请求，
+// 预热请求也可能同时在路上。以前每个请求各跑一遍 yt-dlp（12~20 秒），
+// 既慢又互相拖累；现在只跑一次，其余请求等同一个结果。
+type ProbeResult = { entry: DirectEntry | null; lastErr: string; needsCookies: boolean };
+const inflightProbes = new Map<string, Promise<ProbeResult>>();
+
 async function writeParseLog(row: {
   platform: string;
   type: string;
@@ -413,7 +419,7 @@ async function handle(request: Request): Promise<Response> {
   const { execFile } = await import("node:child_process");
 
   // 先用 --simulate 探测哪个策略能取到媒体（并拿到 CDN 直链）
-  async function probeDirect(): Promise<{ entry: DirectEntry | null; lastErr: string; needsCookies: boolean }> {
+  async function probeDirectOnce(): Promise<ProbeResult> {
     console.log(
       `[api/media-stream] parse start proxy=${proxy ? (tunnelReady ? "on" : "unsupported-scheme") : "off"} platform=${platform || "unknown"} type=${type}`,
     );
@@ -479,6 +485,19 @@ async function handle(request: Request): Promise<Response> {
       }
     }
     return { entry: null, lastErr, needsCookies };
+  }
+
+  function probeDirect(): Promise<ProbeResult> {
+    const running = inflightProbes.get(cacheKey);
+    if (running) {
+      console.log("[api/media-stream] join inflight probe", type, platform || "unknown");
+      return running;
+    }
+    const tracked: Promise<ProbeResult> = probeDirectOnce().finally(() => {
+      if (inflightProbes.get(cacheKey) === tracked) inflightProbes.delete(cacheKey);
+    });
+    inflightProbes.set(cacheKey, tracked);
+    return tracked;
   }
 
   let entry = readDirectCache(cacheKey);

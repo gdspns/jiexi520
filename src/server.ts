@@ -37,12 +37,29 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
   });
 }
 
+// 首页是纯静态 HTML，又带着内联的播放器逻辑，手机浏览器（尤其微信内置）会按
+// 「上次修改时间的 10%」做启发式缓存。改完播放器经常要等半小时才生效，
+// 用户看到的就是「你们改了但我这儿还是老样子」。给 HTML 显式声明 no-cache。
+function withHtmlNoCache(response: Response): Response {
+  if (response.status === 304) return response;
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/html")) return response;
+  if (response.headers.get("cache-control")) return response;
+  const headers = new Headers(response.headers);
+  headers.set("Cache-Control", "no-cache, must-revalidate");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return await normalizeCatastrophicSsrResponse(response);
+      return withHtmlNoCache(await normalizeCatastrophicSsrResponse(response));
     } catch (error) {
       console.error(error);
       return new Response(renderErrorPage(), {
