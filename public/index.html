@@ -1362,7 +1362,7 @@
             // 国内 CDN 必须由用户网络直连：机房在美国，连 39.x（移动）段是 connect timeout，
             // 走 /api/public/media-proxy 只会 502。所以「国内外链」默认就先直连，
             // 直连不成（CORS 被拒 / 链接过期）再退回站内代理。
-            const tryDirect = absolute && (preferDirect || !OVERSEAS_HOST_RE.test(url));
+            const tryDirect = absolute && (preferDirect || !isOverseasHost(url));
             let response = null;
             if (tryDirect) {
                 try {
@@ -1646,7 +1646,7 @@
                 const list = [];
                 if (!u) return list;
                 const absolute = /^https?:\/\//i.test(u);
-                const overseas = OVERSEAS_HOST_RE.test(u);
+                const overseas = isOverseasHost(u);
                 if (absolute && !brokenHosts.has(hostOf(u))) list.push({ kind: 'direct', url: u });
                 if (!absolute || overseas) {
                     list.push({ kind: 'proxy', url: proxifyVideo(u) });
@@ -3176,10 +3176,17 @@
         // 海外平台解析本身就要 10~20 秒（yt-dlp 跑一遍），播放入口再去探一次直链，
         // 等于让用户等两遍。点「开始解析」时先把这个直链缓存预热，
         // 解析结果出来时播放器直接命中缓存，1~3 秒就能出画面。
-        const OVERSEAS_HOST_RE = /(youtube\.com|youtu\.be|tiktok\.com|instagram\.com|facebook\.com|fb\.watch|twitter\.com|x\.com|vimeo\.com)/i;
+        // 按 hostname 精确匹配：用 /x\.com/ 这种子串正则会把 pipix.com（皮皮虾）
+        // 判成 X/Twitter，国内链接被当成海外去预热 media-stream、绕代理，直接播不了。
+        const OVERSEAS_DOMAINS = ['youtube.com', 'youtu.be', 'tiktok.com', 'instagram.com', 'facebook.com', 'fb.watch', 'twitter.com', 'x.com', 'vimeo.com'];
+        function isOverseasHost(u) {
+            const h = hostOf(String(u || ''));
+            if (!h) return false;
+            return OVERSEAS_DOMAINS.some((d) => h === d || h.endsWith('.' + d));
+        }
         let warmAbort = null;
         function warmOverseasStream(url) {
-            if (!OVERSEAS_HOST_RE.test(String(url || ''))) return;
+            if (!isOverseasHost(url)) return;
             try { if (warmAbort) warmAbort.abort(); } catch (e) {}
             const controller = new AbortController();
             warmAbort = controller;

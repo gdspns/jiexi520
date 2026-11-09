@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { signRefreshToken, verifyRefreshToken, REFRESH_TTL_MS } from "@/lib/refresh-token";
+import { matchDomains, OVERSEAS_DOMAINS } from "@/lib/url-host";
 
 const DEFAULT_ENDPOINT = "https://v3.alapi.cn/api/video/url";
 const DEFAULT_TOKEN = "jerv9kslg8kiuxute89fizcl06m5e1";
@@ -17,29 +18,26 @@ function json(data: unknown, status = 200) {
   });
 }
 
+// 注意：一律按 hostname 精确匹配。用 includes("x.com") 会把 pipix.com（皮皮虾）
+// 误判成 X/Twitter，导致皮皮虾被丢给 yt-dlp → Unsupported URL → 502。
 function isOverseas(url: string): boolean {
-  const u = url.toLowerCase();
-  return (
-    u.includes("tiktok.com") ||
-    u.includes("youtube.com") ||
-    u.includes("youtu.be") ||
-    u.includes("instagram.com") ||
-    u.includes("facebook.com") ||
-    u.includes("twitter.com") ||
-    u.includes("x.com") ||
-    u.includes("vimeo.com")
-  );
+  return matchDomains(url, OVERSEAS_DOMAINS);
 }
 
 function determinePlatform(url: string): string {
-  const u = url.toLowerCase();
-  if (u.includes("douyin.com")) return "抖音";
-  if (u.includes("xiaohongshu.com") || u.includes("xhslink.com")) return "小红书";
-  if (u.includes("kuaishou.com")) return "快手";
-  if (u.includes("bilibili.com") || u.includes("b23.tv")) return "B站";
-  if (u.includes("tiktok.com")) return "TikTok";
-  if (u.includes("youtube.com") || u.includes("youtu.be")) return "YouTube";
-  if (u.includes("instagram.com")) return "Instagram";
+  if (matchDomains(url, ["douyin.com", "iesdouyin.com"])) return "抖音";
+  if (matchDomains(url, ["xiaohongshu.com", "xhslink.com"])) return "小红书";
+  if (matchDomains(url, ["kuaishou.com", "chenzhongtech.com", "gifshow.com"])) return "快手";
+  if (matchDomains(url, ["bilibili.com", "b23.tv"])) return "B站";
+  if (matchDomains(url, ["pipix.com"])) return "皮皮虾";
+  if (matchDomains(url, ["weibo.com", "weibo.cn"])) return "微博";
+  if (matchDomains(url, ["ixigua.com"])) return "西瓜视频";
+  if (matchDomains(url, ["tiktok.com"])) return "TikTok";
+  if (matchDomains(url, ["youtube.com", "youtu.be"])) return "YouTube";
+  if (matchDomains(url, ["instagram.com"])) return "Instagram";
+  if (matchDomains(url, ["facebook.com", "fb.watch"])) return "Facebook";
+  if (matchDomains(url, ["twitter.com", "x.com"])) return "X";
+  if (matchDomains(url, ["vimeo.com"])) return "Vimeo";
   return "通用";
 }
 
@@ -66,13 +64,12 @@ function streamUrl(url: string, type: "audio" | "video") {
 }
 
 function pickRefererForSource(url: string): string {
-  const u = url.toLowerCase();
-  if (u.includes("tiktok.com")) return "https://www.tiktok.com/";
-  if (u.includes("youtube.com") || u.includes("youtu.be")) return "https://www.youtube.com/";
-  if (u.includes("instagram.com")) return "https://www.instagram.com/";
-  if (u.includes("facebook.com")) return "https://www.facebook.com/";
-  if (u.includes("twitter.com") || u.includes("x.com")) return "https://twitter.com/";
-  if (u.includes("vimeo.com")) return "https://vimeo.com/";
+  if (matchDomains(url, ["tiktok.com"])) return "https://www.tiktok.com/";
+  if (matchDomains(url, ["youtube.com", "youtu.be"])) return "https://www.youtube.com/";
+  if (matchDomains(url, ["instagram.com"])) return "https://www.instagram.com/";
+  if (matchDomains(url, ["facebook.com", "fb.watch"])) return "https://www.facebook.com/";
+  if (matchDomains(url, ["twitter.com", "x.com"])) return "https://twitter.com/";
+  if (matchDomains(url, ["vimeo.com"])) return "https://vimeo.com/";
   return "https://www.google.com/";
 }
 
@@ -83,13 +80,12 @@ function isLoginCookieRequired(message: string): boolean {
 }
 
 function platformKey(url: string): "TIKTOK" | "YOUTUBE" | "INSTAGRAM" | "FACEBOOK" | "TWITTER" | "VIMEO" | "" {
-  const u = url.toLowerCase();
-  if (u.includes("tiktok.com")) return "TIKTOK";
-  if (u.includes("youtube.com") || u.includes("youtu.be")) return "YOUTUBE";
-  if (u.includes("instagram.com")) return "INSTAGRAM";
-  if (u.includes("facebook.com") || u.includes("fb.watch")) return "FACEBOOK";
-  if (u.includes("twitter.com") || u.includes("x.com")) return "TWITTER";
-  if (u.includes("vimeo.com")) return "VIMEO";
+  if (matchDomains(url, ["tiktok.com"])) return "TIKTOK";
+  if (matchDomains(url, ["youtube.com", "youtu.be"])) return "YOUTUBE";
+  if (matchDomains(url, ["instagram.com"])) return "INSTAGRAM";
+  if (matchDomains(url, ["facebook.com", "fb.watch"])) return "FACEBOOK";
+  if (matchDomains(url, ["twitter.com", "x.com"])) return "TWITTER";
+  if (matchDomains(url, ["vimeo.com"])) return "VIMEO";
   return "";
 }
 

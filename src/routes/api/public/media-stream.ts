@@ -13,6 +13,7 @@ import {
   reportDownloadStats,
   sweepCache,
 } from "@/lib/media-cache.server";
+import { matchDomains, OVERSEAS_DOMAINS } from "@/lib/url-host";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -28,28 +29,18 @@ function attachmentName(name: string | null, fallback: string) {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(cleaned)}`;
 }
 
+// hostname 精确匹配，避免 pipix.com（皮皮虾）被 "x.com" 子串误判成海外平台
 function isSupportedSource(url: string) {
-  const u = url.toLowerCase();
-  return (
-    u.includes("tiktok.com") ||
-    u.includes("youtube.com") ||
-    u.includes("youtu.be") ||
-    u.includes("instagram.com") ||
-    u.includes("facebook.com") ||
-    u.includes("twitter.com") ||
-    u.includes("x.com") ||
-    u.includes("vimeo.com")
-  );
+  return matchDomains(url, OVERSEAS_DOMAINS);
 }
 
 function pickRefererForSource(url: string): string {
-  const u = url.toLowerCase();
-  if (u.includes("tiktok.com")) return "https://www.tiktok.com/";
-  if (u.includes("youtube.com") || u.includes("youtu.be")) return "https://www.youtube.com/";
-  if (u.includes("instagram.com")) return "https://www.instagram.com/";
-  if (u.includes("facebook.com")) return "https://www.facebook.com/";
-  if (u.includes("twitter.com") || u.includes("x.com")) return "https://twitter.com/";
-  if (u.includes("vimeo.com")) return "https://vimeo.com/";
+  if (matchDomains(url, ["tiktok.com"])) return "https://www.tiktok.com/";
+  if (matchDomains(url, ["youtube.com", "youtu.be"])) return "https://www.youtube.com/";
+  if (matchDomains(url, ["instagram.com"])) return "https://www.instagram.com/";
+  if (matchDomains(url, ["facebook.com", "fb.watch"])) return "https://www.facebook.com/";
+  if (matchDomains(url, ["twitter.com", "x.com"])) return "https://twitter.com/";
+  if (matchDomains(url, ["vimeo.com"])) return "https://vimeo.com/";
   return "https://www.google.com/";
 }
 
@@ -60,13 +51,12 @@ function isLoginCookieRequired(message: string): boolean {
 }
 
 function platformKey(url: string): "TIKTOK" | "YOUTUBE" | "INSTAGRAM" | "FACEBOOK" | "TWITTER" | "VIMEO" | "" {
-  const u = url.toLowerCase();
-  if (u.includes("tiktok.com")) return "TIKTOK";
-  if (u.includes("youtube.com") || u.includes("youtu.be")) return "YOUTUBE";
-  if (u.includes("instagram.com")) return "INSTAGRAM";
-  if (u.includes("facebook.com") || u.includes("fb.watch")) return "FACEBOOK";
-  if (u.includes("twitter.com") || u.includes("x.com")) return "TWITTER";
-  if (u.includes("vimeo.com")) return "VIMEO";
+  if (matchDomains(url, ["tiktok.com"])) return "TIKTOK";
+  if (matchDomains(url, ["youtube.com", "youtu.be"])) return "YOUTUBE";
+  if (matchDomains(url, ["instagram.com"])) return "INSTAGRAM";
+  if (matchDomains(url, ["facebook.com", "fb.watch"])) return "FACEBOOK";
+  if (matchDomains(url, ["twitter.com", "x.com"])) return "TWITTER";
+  if (matchDomains(url, ["vimeo.com"])) return "VIMEO";
   return "";
 }
 

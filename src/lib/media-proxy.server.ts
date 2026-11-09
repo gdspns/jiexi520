@@ -48,7 +48,8 @@ function pickReferer(host: string): string | null {
     return "https://www.instagram.com/";
   if (h.includes("facebook") || h.includes("fbsbx"))
     return "https://www.facebook.com/";
-  if (h.includes("twitter") || h.includes("twimg") || h.includes("x.com"))
+  // 精确匹配 x.com，避免 pix.com / pipix.com 这类域名被子串误判
+  if (h.includes("twitter") || h.includes("twimg") || h === "x.com" || h.endsWith(".x.com"))
     return "https://twitter.com/";
   if (h.includes("vimeo") || h.includes("vimeocdn"))
     return "https://vimeo.com/";
