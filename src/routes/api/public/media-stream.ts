@@ -103,12 +103,15 @@ function buildPlatformStrategies(
     ];
   }
   if (platform === "YOUTUBE") {
+    // 线上日志里成功的一直是 yt-android（web/visionOS 客户端已经不再给合并音视频的格式，
+    // 只回 video only，`best[ext=mp4]` 必然报 Requested format is not available）。
+    // 把它放第一位，冷启动首次解析能省掉 10~15 秒的无效探测。
     return [
-      { name: "yt-default", ua: UA_DESKTOP },
       { name: "yt-android", ua: UA_MOBILE, extractor: "youtube:player_client=android" },
       { name: "yt-ios", ua: UA_MOBILE, extractor: "youtube:player_client=ios" },
-      { name: "yt-web", ua: UA_DESKTOP, extractor: "youtube:player_client=web" },
       { name: "yt-tv", ua: UA_DESKTOP, extractor: "youtube:player_client=tv_embedded" },
+      { name: "yt-default", ua: UA_DESKTOP },
+      { name: "yt-web", ua: UA_DESKTOP, extractor: "youtube:player_client=web" },
     ];
   }
   if (platform === "INSTAGRAM") {
