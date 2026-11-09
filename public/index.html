@@ -2,6 +2,11 @@
 <html lang="zh-CN" class="dark">
 <head>
     <meta charset="UTF-8">
+    <!-- 必须放在最前面：国内 CDN（抖音 365yg / 快手 / 小红书）会按 Referer 防盗链，
+         从本站打开直链时浏览器默认带 Referer: https://www.jx521.top/，CDN 直接回 403，
+         表现为「能解析出来但播不了/下载不了」。<video referrerpolicy> 对媒体请求
+         在 Chromium 上并不生效（实测仍会带 Referer），只有文档级 meta 才可靠。 -->
+    <meta name="referrer" content="no-referrer">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>音影无损 - 视频转MP3提取器 (Pro)</title>
     <meta name="description" content="音影无损 - 专业在线视频解析无水印下载工具，支持抖音、快手、TikTok、YouTube、B站、小红书、Instagram等100+平台视频转MP3音频提取，一键无水印下载高清视频，免费解析下载。">
@@ -1353,13 +1358,19 @@
         // 带下载进度追踪的 fetch
         async function fetchWithProgress(url, onProgress, preferDirect = false) {
             const proxied = proxify(url);
-            let response;
-            if (preferDirect && /^https?:\/\//i.test(url)) {
-                response = await fetch(url, { referrerPolicy: 'no-referrer' });
-                if (!response.ok) throw new Error('直连返回 ' + response.status);
-            } else {
-                response = await fetch(proxied);
+            const absolute = /^https?:\/\//i.test(String(url || ''));
+            // 国内 CDN 必须由用户网络直连：机房在美国，连 39.x（移动）段是 connect timeout，
+            // 走 /api/public/media-proxy 只会 502。所以「国内外链」默认就先直连，
+            // 直连不成（CORS 被拒 / 链接过期）再退回站内代理。
+            const tryDirect = absolute && (preferDirect || !OVERSEAS_HOST_RE.test(url));
+            let response = null;
+            if (tryDirect) {
+                try {
+                    const direct = await fetch(url, { referrerPolicy: 'no-referrer' });
+                    if (direct.ok) response = direct;
+                } catch (e) {}
             }
+            if (!response) response = await fetch(proxied);
             if (!response.ok) throw new Error('媒体代理返回 ' + response.status);
             if (!response.body || !onProgress) return response;
 
@@ -1550,7 +1561,9 @@
             // 以前 proxy 只给 11 秒，手机端冷链接必然「超时 → 换线路 → 失败」，
             // 而网页端没有这个超时，所以「网页能播、手机不能播」。
             // 现在：预热命中时 1~3 秒；未命中就给足 45 秒，并且状态文案说明在等什么。
-            const TIMEOUT = { direct: 4000, proxy: 45000, compat: 15000 };
+            // direct 是手机端唯一可用的线路（国内 CDN 只有用户网络能到），4 秒太短：
+            // 4G 首包 3~5 秒很常见，一超时就换线路等于必然失败。给到 8 秒。
+            const TIMEOUT = { direct: 8000, proxy: 45000, compat: 15000 };
             let video = null, stateEl = null, spinnerEl = null, statusEl = null, readyEl = null;
             let sources = [], index = 0, refreshUsed = 0, loadTimer = null;
             let resumeAt = 0, wantPlay = false, busy = false, bound = false;
@@ -1622,17 +1635,24 @@
                 setStatus(text || '点这里播放', { spinner: false, action: true, retry: mode === 'retry' });
             }
 
-            // 站内地址（海外 media-stream 等）不能直连
+            // 线路顺序。关键前提：本站服务器在美国，**拉不到国内 CDN**（抖音 365yg 的
+            // 39.x 段从机房连过去是 connect timeout），所以国内直链只能由用户手机直连，
+            // 走 /api/public/media-proxy 只会换回一个 502，白等 45 秒还播不了。
+            // 国内：只留直连，失败就重新解析换新链（refresh 不扣积分）。
+            // 海外站内地址（media-stream）：只有代理一条路。
+            // 海外外链：直连 → 代理 → 转码兜底。
             function buildSources(rawUrl) {
                 const u = String(rawUrl || '');
                 const list = [];
                 if (!u) return list;
                 const absolute = /^https?:\/\//i.test(u);
+                const overseas = OVERSEAS_HOST_RE.test(u);
                 if (absolute && !brokenHosts.has(hostOf(u))) list.push({ kind: 'direct', url: u });
-                list.push({ kind: 'proxy', url: proxifyVideo(u) });
-                // 海外链接的 video_url 是站内 /api/public/media-stream，转码接口只接外链，
-                // 拼上去只会拿 400 再白等一轮超时。
-                if (absolute) list.push({ kind: 'compat', url: '/api/public/video-compat?url=' + encodeURIComponent(u) });
+                if (!absolute || overseas) {
+                    list.push({ kind: 'proxy', url: proxifyVideo(u) });
+                    // 海外外链的转码接口只接外链，站内地址拼上去只会拿 400 再白等一轮超时。
+                    if (absolute) list.push({ kind: 'compat', url: '/api/public/video-compat?url=' + encodeURIComponent(u) });
+                }
                 return list;
             }
 
@@ -1716,8 +1736,10 @@
                 clearLoadTimer();
                 const current = sources[index];
                 const code = video.error ? video.error.code : 0;
-                // code 4 = 源不可用（403/404 的 HTML 错误页、格式不支持），直连域名记下来
-                if (current && current.kind === 'direct' && (code === 4 || code === 2)) {
+                // code 4 = 源不可用（403/404 的 HTML 错误页、格式不支持），直连域名记下来。
+                // 只有「还有别的线路可换」时才拉黑：国内平台现在只有直连一条路，
+                // 拉黑后换新链会被自己跳过，直接变成「视频加载失败」。
+                if (current && current.kind === 'direct' && (code === 4 || code === 2) && sources.length > index + 1) {
                     brokenHosts.add(hostOf(current.url));
                 }
                 nextSource('error:' + code);
@@ -1781,6 +1803,9 @@
                 if (!fresh) return fatal('视频链接已失效，请重新解析');
                 resumeAt = at || 0;
                 // 关键修复点：换到新直链后立刻重建线路并把新地址真正交给 <video>
+                // 新链是重新签发的，之前拉黑过的域名要放开，否则国内平台（只有直连一条路）
+                // 会拿着新地址却被自己跳过，直接报「视频加载失败」。
+                brokenHosts.delete(hostOf(fresh));
                 sources = buildSources(fresh);
                 index = 0;
                 wantPlay = true;
