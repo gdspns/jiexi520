@@ -2062,7 +2062,11 @@
         // 用户看到的就是「点了没反应 / 分享被拦住」。所以小视频会提前预读，
         // 用户点到「存入相册」时几乎是瞬间调起系统菜单。
         const MOBILE_SHARE_LIMIT = 80 * 1024 * 1024;
-        const MOBILE_PREFETCH_LIMIT = 12 * 1024 * 1024;
+        // 预读阈值和「太大」阈值统一到 30MB：≤30MB 在弹窗打开时就悄悄读进内存，
+        // 点「存入相册」时几乎是瞬间调起系统菜单（12~30MB 以前因为读得慢，
+        // 手势过期，菜单根本弹不出来，表现就是「有的视频有存储视频、有的没有」）。
+        const MOBILE_LARGE_FILE_LIMIT = 30 * 1024 * 1024;
+        const MOBILE_PREFETCH_LIMIT = MOBILE_LARGE_FILE_LIMIT;
 
         function formatSize(bytes) {
             if (!bytes || !isFinite(bytes)) return '';
@@ -2118,13 +2122,18 @@
             overlay.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:2147483647;'
                 + 'display:flex;align-items:center;justify-content:center;padding:16px;'
                 + 'background:rgba(0,0,0,.85);transform:translateZ(0);-webkit-transform:translateZ(0);'
-                + 'will-change:transform;overscroll-behavior:contain;';
+                + 'will-change:transform;overscroll-behavior:contain;overflow-y:auto;-webkit-overflow-scrolling:touch;';
             overlay.innerHTML = `
-                <div class="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl text-center" style="position:relative;z-index:1">
+                <div class="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl text-center" style="position:relative;z-index:1;max-height:calc(100vh - 32px);overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch">
                     <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-500/20 text-blue-300"><i class="fa-solid fa-video"></i></div>
                     <h3 class="text-lg font-bold text-white mb-1">保存视频</h3>
                     <p class="save-size text-xs text-slate-500 mb-1"></p>
                     <p class="save-device text-[11px] text-slate-500 mb-3"></p>
+                    <div class="save-large hidden mb-3 rounded-xl border border-amber-500/50 bg-amber-500/10 p-3 text-left">
+                        <p class="text-[13px] font-bold text-amber-200"><i class="fa-solid fa-triangle-exclamation mr-1"></i>视频太大，请使用电脑网页端保存</p>
+                        <p class="save-large-text text-[11px] leading-relaxed text-amber-100/80 mt-1"></p>
+                        <button type="button" class="save-large-desktop mt-2 w-full rounded-lg bg-amber-400 py-2 text-xs font-bold text-slate-900">查看电脑端保存方法</button>
+                    </div>
                     <p class="save-tip text-sm text-slate-300 mb-4">正在读取视频信息…</p>
                     <div class="save-progress-wrap hidden mb-4">
                         <div class="h-2 overflow-hidden rounded-full bg-slate-800 mb-2"><div class="save-progress h-full w-0 bg-gradient-to-r from-blue-500 to-indigo-500 transition-all"></div></div>
@@ -2163,6 +2172,9 @@
             const desktopToggle = overlay.querySelector('.save-desktop-toggle');
             const desktopBox = overlay.querySelector('.save-desktop');
             const siteBtn = overlay.querySelector('.save-site');
+            const largeWarn = overlay.querySelector('.save-large');
+            const largeText = overlay.querySelector('.save-large-text');
+            const largeDesktopBtn = overlay.querySelector('.save-large-desktop');
             const openedAt = Date.now();
 
             // 手机端保存受浏览器限制（尤其微信/UC/夸克），给一个明确的第二方案：
@@ -2179,6 +2191,14 @@
                     else {
                         desktopBox.classList.add('hidden');
                         desktopToggle.textContent = '手机保存不了？用电脑网页端保存';
+                    }
+                });
+            }
+            if (largeDesktopBtn) {
+                largeDesktopBtn.addEventListener('click', () => {
+                    revealDesktop();
+                    if (desktopBox) {
+                        try { desktopBox.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) {}
                     }
                 });
             }
@@ -2286,6 +2306,24 @@
                 }
             }
 
+            // ---- 大于 30MB：直接提示用电脑网页端保存 ----
+            // iPhone 的系统分享对体积敏感：同一个站点，小视频能弹出「存储视频」，
+            // 稍大的视频菜单里就没有这一项（甚至直接不弹菜单）。这种情况在手机上
+            // 反复试没有意义，给一条明确出路比让人猜要省事得多。
+            const isLargeFile = totalBytes > MOBILE_LARGE_FILE_LIMIT;
+            if (isLargeFile) {
+                largeWarn.classList.remove('hidden');
+                largeText.textContent = `这个视频 ${formatSize(totalBytes)}，超过 30MB 后手机保存到相册经常失败（iPhone 的系统菜单里尤其容易不出现「存储视频」）。建议用电脑网页端下载，一次就能存好。`;
+                if (env.isIOS && shareMode) {
+                    tipEl.textContent = `视频较大（${formatSize(totalBytes)}），「存储视频」很可能不出现，建议直接用电脑网页端保存。`;
+                    // 保留入口但降级成次要按钮，避免用户以为这是主路径
+                    shareBtn.className = 'save-share w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100';
+                    shareBtn.textContent = '仍要尝试存入相册';
+                    hintEl.textContent = '还想在手机上试：点「下载到「文件」」把 mp4 存到「文件」App，或「在浏览器打开视频」后长按画面 → 存储照片。';
+                }
+                revealDesktop();
+            }
+
             // ---- 提前把视频读进内存（仅小文件）----
             // 系统分享必须在用户点击的「同一个手势」里调起，中间一旦 await 十几秒
             // 下载，手势就失效，navigator.share 直接抛 NotAllowedError —— 用户的感受
@@ -2375,8 +2413,11 @@
                     } catch (error) {
                         if (error?.name === 'AbortError') { statusEl.textContent = '已取消'; return; }
                         progressWrap.classList.add('hidden');
-                        if (error?.code === 'TOO_LARGE') {
-                            tipEl.textContent = `视频较大（${formatSize(totalBytes)}），已切换到不占内存的方式：请用「下载 MP4 视频」或「在浏览器打开视频」再保存。`;
+                        // TOO_LARGE 说明确实超过上限（>80MB），即便之前没量到大小也算「太大」
+                        const tooLarge = error?.code === 'TOO_LARGE';
+                        const big = isLargeFile || tooLarge;
+                        if (tooLarge) {
+                            tipEl.textContent = `视频太大（${formatSize(totalBytes) || '超过 80MB'}），请使用电脑网页端保存。`;
                             shareBtn.style.display = 'none';
                             if (env.isIOS) playLink.className = 'save-play ' + primaryCls;
                         } else if (error?.name === 'NotAllowedError' || /not allowed|denied|拦截/.test(String(error?.message || ''))) {
@@ -2387,8 +2428,18 @@
                         } else {
                             tipEl.textContent = '分享被浏览器拦住了，改用「下载 MP4 视频」或「在浏览器打开视频」再保存。';
                         }
+                        if (big) {
+                            // 大文件失败基本是必然的：明确指向电脑端，别让用户反复点
+                            largeWarn.classList.remove('hidden');
+                            tipEl.textContent = `视频太大${totalBytes ? `（${formatSize(totalBytes)}）` : ''}，请使用电脑网页端保存。`;
+                        }
                         revealDesktop();
-                        showToast(error?.code === 'TOO_LARGE' ? '视频较大，请改用下载或长按保存' : (error?.message || '保存失败，可改用电脑网页端保存'), 'error');
+                        showToast(
+                            big
+                                ? '视频太大，请使用电脑网页端保存'
+                                : (error?.message || '保存失败，可改用电脑网页端保存'),
+                            'error',
+                        );
                     } finally {
                         shareBtn.dataset.busy = '0';
                         shareBtn.disabled = false;
