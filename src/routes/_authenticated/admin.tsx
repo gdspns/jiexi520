@@ -5,6 +5,7 @@ import { Fragment, useEffect, useState } from "react";
 import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig, listParseLogs, getInviteReport, getInviteConfig, setInviteRewards } from "@/lib/admin.functions";
 import { deleteOrder, getPaymentConfig, listOrdersAdmin, listProductsAdmin, setPaymentConfig, upsertProduct, deleteProduct } from "@/lib/payment.functions";
 import { supabase } from "@/integrations/supabase/client";
+import { CleanupPanel } from "@/components/cleanup-panel";
 
 export const Route = createFileRoute("/_authenticated/admin")({
   beforeLoad: async () => {
@@ -30,12 +31,13 @@ export const Route = createFileRoute("/_authenticated/admin")({
   ),
 });
 
-type MenuKey = "users" | "settings" | "products" | "orders" | "logs" | "invites";
+type MenuKey = "users" | "settings" | "products" | "orders" | "logs" | "invites" | "maintenance";
 
 function AdminPage() {
   const navigate = useNavigate();
   const [activeMenu, setActiveMenu] = useState<MenuKey>("users");
   const [productMenuOpen, setProductMenuOpen] = useState(false);
+  const [maintMenuOpen, setMaintMenuOpen] = useState(true);
 
   const list = useServerFn(listUsers);
   const ban = useServerFn(setBanned);
@@ -405,6 +407,31 @@ function AdminPage() {
               </div>
             )}
           </div>
+
+          {/* 系统维护 可展开 */}
+          <div>
+            <button
+              onClick={() => setMaintMenuOpen((v) => !v)}
+              className={`w-full text-left px-4 py-2.5 rounded-lg text-sm flex items-center justify-between transition-colors ${
+                activeMenu === "maintenance"
+                  ? "bg-pink-600/20 text-pink-300 font-semibold"
+                  : "text-slate-300 hover:bg-slate-800"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <span>🧹</span>
+                <span>系统维护</span>
+              </span>
+              <span className="text-xs transition-transform duration-200" style={{ transform: maintMenuOpen ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
+            </button>
+            {maintMenuOpen && (
+              <div className="mt-1 space-y-0.5">
+                <button onClick={() => switchMenu("maintenance")} className={subItemClass("maintenance")}>
+                  定时清理
+                </button>
+              </div>
+            )}
+          </div>
         </nav>
         <div className="px-3 py-4 border-t border-slate-800 space-y-1">
           <a href="/index.html" className="block text-center text-sm px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200">
@@ -426,6 +453,7 @@ function AdminPage() {
             {activeMenu === "orders" && "订单管理"}
             {activeMenu === "logs" && "解析日志"}
             {activeMenu === "invites" && "邀请拉新"}
+            {activeMenu === "maintenance" && "系统维护 / 定时清理"}
           </h2>
         </header>
 
@@ -890,6 +918,9 @@ function AdminPage() {
 
           {/* ========== 邀请拉新 ========== */}
           {activeMenu === "invites" && <InvitesPanel />}
+
+          {/* ========== 系统维护 ========== */}
+          {activeMenu === "maintenance" && <CleanupPanel />}
         </div>
       </main>
 

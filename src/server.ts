@@ -2,6 +2,11 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
+import { startCleanupScheduler } from "./lib/media-cache.server";
+
+// 媒体缓存的定时清理跟着服务进程启动：部署完成就在跑，不用登录服务器装 crontab；
+// 换服务器/重装后同样自动生效，后台只负责改间隔、看状态、手动触发。
+startCleanupScheduler();
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;

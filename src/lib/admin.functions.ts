@@ -1,6 +1,14 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import {
+  MAX_INTERVAL_MINUTES,
+  MIN_INTERVAL_MINUTES,
+  getCleanupStatus,
+  runCleanup,
+  saveCleanupConfig,
+  startCleanupScheduler,
+} from "@/lib/media-cache.server";
 
 async function assertAdmin(supabase: any, userId: string) {
   const [{ data: profile }, { data: roles }, authResult] = await Promise.all([
@@ -284,4 +292,57 @@ export const setInviteRewards = createServerFn({ method: "POST" })
     });
     if (error) throw new Error(error.message);
     return { ok: true };
+  });
+
+// ============ 系统维护：媒体缓存定时清理 ============
+// 定时器跟着服务进程走：部署完成自动运行，配置存 Supabase，所以整站换服务器也一致。
+// 后台「系统维护 → 定时清理」用这几个接口看状态、改间隔、手动清、重装调度器。
+
+const intervalSchema = z.number().int().min(MIN_INTERVAL_MINUTES).max(MAX_INTERVAL_MINUTES);
+
+export const getMediaCleanup = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    return await getCleanupStatus();
+  });
+
+export const saveMediaCleanup = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({ enabled: z.boolean(), intervalMinutes: intervalSchema }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const config = await saveCleanupConfig(data);
+    startCleanupScheduler();
+    return { config, status: await getCleanupStatus() };
+  });
+
+export const runMediaCleanup = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    startCleanupScheduler();
+    const run = await runCleanup("manual");
+    return { run, status: await getCleanupStatus() };
+  });
+
+// 「安装」：启用定时清理 + 启动调度器 + 立刻执行一次。
+// 换新服务器 / 重装后点一下即可，不需要登录服务器装 crontab。
+export const installMediaCleanup = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({ intervalMinutes: intervalSchema.optional() }).parse(input ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const current = await getCleanupStatus();
+    const config = await saveCleanupConfig({
+      enabled: true,
+      intervalMinutes: data.intervalMinutes ?? current.config.intervalMinutes,
+    });
+    startCleanupScheduler();
+    const run = await runCleanup("install");
+    return { config, run, status: await getCleanupStatus() };
   });
