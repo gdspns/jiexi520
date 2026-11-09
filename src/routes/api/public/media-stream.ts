@@ -133,7 +133,11 @@ function buildPlatformStrategies(
   return [{ name: "default", ua: UA_DESKTOP }];
 }
 
-async function readProxySetting() {
+// ---- 后台代理配置：带 30 秒缓存，避免每个分段请求都打一次 Supabase ----
+let proxyCache: { value: string; at: number } | null = null;
+
+async function readProxySetting(): Promise<string> {
+  if (proxyCache && Date.now() - proxyCache.at < 30_000) return proxyCache.value;
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return "";
@@ -141,12 +145,179 @@ async function readProxySetting() {
     const { createClient } = await import("@supabase/supabase-js");
     const sb = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
     const { data } = await sb.from("app_settings").select("value").eq("key", "api_proxy").maybeSingle();
-    return typeof data?.value === "string" ? data.value : data?.value == null ? "" : String(data.value);
+    const value = typeof data?.value === "string" ? data.value : data?.value == null ? "" : String(data.value);
+    proxyCache = { value, at: Date.now() };
+    return value;
   } catch (err) {
     console.error("[api/media-stream] failed to read proxy setting", err);
-    return "";
+    return proxyCache?.value || "";
   }
 }
+
+function normalizeProxy(raw: string): URL | null {
+  const text = (raw || "").trim();
+  if (!text) return null;
+  try {
+    const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`;
+    const u = new URL(withScheme);
+    // 只有 http(s) 代理能用 CONNECT 隧道；socks5 交给 yt-dlp 自己走
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    if (!u.hostname) return null;
+    return u;
+  } catch {
+    return null;
+  }
+}
+
+// ---- 自建 CONNECT 隧道 ----
+// 之前这里是 `await import("undici")` + ProxyAgent，但容器里 node_modules 只留了 tslib，
+// 动态导入的裸模块名不会被 Nitro 重写，运行时必然 ERR_MODULE_NOT_FOUND，异常被 catch 吞掉，
+// 于是 CDN 直链一直是「直连」出去的。而 YouTube/IG 的 googlevideo 直链带 ip=<代理IP>，
+// 用服务器自己的 IP 去拉会被 403。这里改用 node 原生 CONNECT 隧道，不依赖任何第三方包。
+const tunnelAgents = new Map<string, unknown>();
+
+async function getTunnelAgent(proxyUrl: URL, secure: boolean, hostname: string, port: number): Promise<any> {
+  const key = `${proxyUrl.href}|${secure ? "https" : "http"}|${hostname}:${port}`;
+  const cached = tunnelAgents.get(key);
+  if (cached) return cached;
+
+  const httpMod: any = await import("node:http");
+  const httpsMod: any = await import("node:https");
+  const tlsMod: any = await import("node:tls");
+  const proxySecure = proxyUrl.protocol === "https:";
+  const proxyPort = Number(proxyUrl.port || (proxySecure ? 443 : 80));
+  const auth = proxyUrl.username
+    ? "Basic " +
+      Buffer.from(
+        `${decodeURIComponent(proxyUrl.username)}:${decodeURIComponent(proxyUrl.password)}`,
+      ).toString("base64")
+    : "";
+
+  const openTunnel = () =>
+    new Promise<any>((resolve, reject) => {
+      const mod = proxySecure ? httpsMod : httpMod;
+      const req = mod.request({
+        host: proxyUrl.hostname,
+        port: proxyPort,
+        method: "CONNECT",
+        path: `${hostname}:${port}`,
+        headers: {
+          Host: `${hostname}:${port}`,
+          ...(auth ? { "Proxy-Authorization": auth } : {}),
+        },
+        timeout: 15_000,
+        ...(proxySecure ? { servername: proxyUrl.hostname, rejectUnauthorized: false } : {}),
+      });
+      req.on("connect", (res: any, socket: any) => {
+        if (res.statusCode !== 200) {
+          socket.destroy();
+          reject(new Error(`proxy CONNECT ${res.statusCode}`));
+          return;
+        }
+        if (!secure) {
+          resolve(socket);
+          return;
+        }
+        const tlsSocket = tlsMod.connect({ socket, servername: hostname });
+        tlsSocket.once("secureConnect", () => resolve(tlsSocket));
+        tlsSocket.once("error", reject);
+      });
+      req.on("timeout", () => req.destroy(new Error("proxy connect timeout")));
+      req.on("error", reject);
+      req.end();
+    });
+
+  const AgentCtor = secure ? httpsMod.Agent : httpMod.Agent;
+  const agent: any = new AgentCtor({ keepAlive: true, maxSockets: 4 });
+  // 必须用回调形式：Agent 会把返回值当成 socket，返回 Promise 会导致连接错乱
+  agent.createConnection = (_opts: unknown, cb: (err: Error | null, socket?: unknown) => void) => {
+    openTunnel().then(
+      (socket) => cb(null, socket),
+      (err) => cb(err as Error),
+    );
+  };
+
+  if (tunnelAgents.size > 64) tunnelAgents.clear();
+  tunnelAgents.set(key, agent);
+  return agent;
+}
+
+async function fetchViaTunnel(
+  directUrl: string,
+  headers: Record<string, string>,
+  proxy: string,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const proxyUrl = normalizeProxy(proxy);
+  if (!proxyUrl) throw new Error("proxy scheme not supported by tunnel");
+  const target = new URL(directUrl);
+  const secure = target.protocol === "https:";
+  const port = Number(target.port || (secure ? 443 : 80));
+  const agent = await getTunnelAgent(proxyUrl, secure, target.hostname, port);
+  const mod: any = secure ? await import("node:https") : await import("node:http");
+
+  return new Promise<Response>((resolve, reject) => {
+    const req = mod.request(
+      {
+        host: target.hostname,
+        port,
+        path: target.pathname + target.search,
+        method: "GET",
+        headers,
+        agent,
+      },
+      async (upstream: any) => {
+        try {
+          const h = new Headers();
+          for (const [k, v] of Object.entries(upstream.headers || {})) {
+            if (v == null) continue;
+            h.set(k, Array.isArray(v) ? v.join(", ") : String(v));
+          }
+          const { Readable } = await import("node:stream");
+          const body = Readable.toWeb(upstream) as unknown as ReadableStream<Uint8Array>;
+          resolve(new Response(body, { status: upstream.statusCode || 200, headers: h }));
+        } catch (err) {
+          reject(err as Error);
+        }
+      },
+    );
+    req.on("error", reject);
+    req.setTimeout(30_000, () => req.destroy(new Error("upstream timeout")));
+    if (signal) {
+      if (signal.aborted) req.destroy();
+      else signal.addEventListener("abort", () => req.destroy(), { once: true });
+    }
+    req.end();
+  });
+}
+
+// ---- CDN 直链缓存 ----
+// 手机端保存是 2MB 分段下载，每次请求都重跑一遍 yt-dlp 探测要 8~25 秒，一条 30MB 视频
+// 会被拖到几分钟。这里按「类型+代理+原始链接」缓存解析结果，时效 8 分钟。
+type DirectEntry = { directUrl: string; ua: string; extractor?: string; extra: string[]; expires: number };
+const directCache = new Map<string, DirectEntry>();
+const DIRECT_TTL_MS = 8 * 60 * 1000;
+
+function readDirectCache(key: string): DirectEntry | null {
+  const hit = directCache.get(key);
+  if (!hit) return null;
+  if (hit.expires <= Date.now()) {
+    directCache.delete(key);
+    return null;
+  }
+  return hit;
+}
+
+function writeDirectCache(key: string, entry: Omit<DirectEntry, "expires">) {
+  if (directCache.size > 200) {
+    for (const [k, v] of directCache) if (v.expires <= Date.now()) directCache.delete(k);
+    if (directCache.size > 200) directCache.clear();
+  }
+  directCache.set(key, { ...entry, expires: Date.now() + DIRECT_TTL_MS });
+}
+
+// 记住每个平台上次成功的策略，下次优先试，避免每次先跑一遍注定失败的策略
+const strategyHints = new Map<string, string>();
 
 async function writeParseLog(row: {
   platform: string;
@@ -204,6 +375,7 @@ async function handle(request: Request): Promise<Response> {
 
   const { spawn } = await import("node:child_process");
   const proxy = await readProxySetting();
+  const tunnelReady = Boolean(normalizeProxy(proxy));
   const referer = pickRefererForSource(target);
   const format =
     type === "audio" ? "bestaudio[ext=m4a]/bestaudio/best[ext=mp4]/best" : "best[ext=mp4]/best";
@@ -212,17 +384,8 @@ async function handle(request: Request): Promise<Response> {
   const UA_MOBILE =
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
   const platform = platformKey(target);
-  console.log(
-    `[api/media-stream] parse start proxy=${proxy ? "on" : "off"} platform=${platform || "unknown"} type=${type}`,
-  );
-  void writeParseLog({
-    platform: platform || "unknown",
-    type,
-    proxy_on: !!proxy,
-    url: target,
-    status: "start",
-    message: "",
-  });
+  const cacheKey = `${type}|${proxy}|${target}`;
+
   const strategies = buildPlatformStrategies(platform, UA_DESKTOP, UA_MOBILE);
   const cookieArgSets = platform ? await buildCookieArgSets(platform) : [];
   const attempts = [
@@ -235,55 +398,97 @@ async function handle(request: Request): Promise<Response> {
       })),
     ),
   ];
+  const hint = strategyHints.get(platform || "default");
+  if (hint) {
+    const idx = attempts.findIndex((a) => a.name === hint);
+    if (idx > 0) attempts.unshift(...attempts.splice(idx, 1));
+  }
 
-  // 先用 --simulate 探测哪个策略能取到媒体（并拿到 CDN 直链），
-  // 之后优先把播放器的 Range 请求直接转发到 CDN（支持拖动/时长显示），
-  // 直链拉取失败再退回 yt-dlp 管道流
   const { execFile } = await import("node:child_process");
-  let chosen: typeof attempts[number] | null = null;
-  let directUrl = "";
+
+  // 先用 --simulate 探测哪个策略能取到媒体（并拿到 CDN 直链）
+  async function probeDirect(): Promise<{ entry: DirectEntry | null; lastErr: string; needsCookies: boolean }> {
+    console.log(
+      `[api/media-stream] parse start proxy=${proxy ? (tunnelReady ? "on" : "unsupported-scheme") : "off"} platform=${platform || "unknown"} type=${type}`,
+    );
+    void writeParseLog({
+      platform: platform || "unknown",
+      type,
+      proxy_on: !!proxy,
+      url: target,
+      status: "start",
+      message: "",
+    });
+    let lastErr = "";
+    let needsCookies = false;
+    for (const s of attempts) {
+      const probeArgs = [
+        "-f", format,
+        "--simulate", "--get-url",
+        "--no-warnings", "--no-check-certificates",
+        "--socket-timeout", "20",
+        "--geo-bypass",
+        "--add-header", `referer:${referer}`,
+        "--add-header", `user-agent:${s.ua}`,
+      ];
+      if (s.extractor) probeArgs.push("--extractor-args", s.extractor);
+      probeArgs.push(...s.extra);
+      if (proxy) probeArgs.push("--proxy", proxy);
+      probeArgs.push(target);
+      try {
+        const found = await new Promise<string>((resolve, reject) => {
+          execFile(
+            configuredPath,
+            probeArgs,
+            { encoding: "utf8", timeout: 25_000, maxBuffer: 4 * 1024 * 1024,
+              env: { ...process.env, PYTHONIOENCODING: "utf-8" } },
+            (error, stdout, stderr) => {
+              if (error) { lastErr = redactSensitive(stderr || error.message, proxy); reject(error); return; }
+              const url = String(stdout || "")
+                .split(/\r?\n/)
+                .map((l) => l.trim())
+                .find((l) => /^https?:\/\//i.test(l));
+              if (!url) { lastErr = "empty url"; reject(new Error("empty")); return; }
+              resolve(url);
+            },
+          );
+        });
+        strategyHints.set(platform || "default", s.name);
+        void writeParseLog({
+          platform: platform || "unknown",
+          type,
+          proxy_on: !!proxy,
+          url: target,
+          status: "ok",
+          message: s.name,
+        });
+        return {
+          entry: { directUrl: found, ua: s.ua, extractor: s.extractor, extra: s.extra, expires: 0 },
+          lastErr,
+          needsCookies,
+        };
+      } catch {
+        if (isLoginCookieRequired(lastErr)) needsCookies = true;
+        console.error(`[api/media-stream] strategy ${s.name} failed:`, lastErr.slice(0, 800));
+      }
+    }
+    return { entry: null, lastErr, needsCookies };
+  }
+
+  let entry = readDirectCache(cacheKey);
   let lastErr = "";
   let needsCookies = false;
-  for (const s of attempts) {
-    const probeArgs = [
-      "-f", format,
-      "--simulate", "--get-url",
-      "--no-warnings", "--no-check-certificates",
-      "--socket-timeout", "20",
-      "--geo-bypass",
-      "--add-header", `referer:${referer}`,
-      "--add-header", `user-agent:${s.ua}`,
-    ];
-    if (s.extractor) probeArgs.push("--extractor-args", s.extractor);
-    probeArgs.push(...s.extra);
-    if (proxy) probeArgs.push("--proxy", proxy);
-    probeArgs.push(target);
-    try {
-      await new Promise<string>((resolve, reject) => {
-        execFile(
-          configuredPath,
-          probeArgs,
-          { encoding: "utf8", timeout: 25_000, maxBuffer: 4 * 1024 * 1024,
-            env: { ...process.env, PYTHONIOENCODING: "utf-8" } },
-          (error, stdout, stderr) => {
-            if (error) { lastErr = redactSensitive(stderr || error.message, proxy); reject(error); return; }
-            const found = String(stdout || "")
-              .split(/\r?\n/)
-              .map((l) => l.trim())
-              .find((l) => /^https?:\/\//i.test(l));
-            if (!found) { lastErr = "empty url"; reject(new Error("empty")); return; }
-            resolve(found);
-          },
-        );
-      }).then((u) => { directUrl = u; });
-      chosen = s;
-      break;
-    } catch {
-      if (isLoginCookieRequired(lastErr)) needsCookies = true;
-      console.error(`[api/media-stream] strategy ${s.name} failed:`, lastErr.slice(0, 800));
-    }
+  if (entry) {
+    console.log("[api/media-stream] direct url cache hit", type, platform || "unknown");
+  } else {
+    const probed = await probeDirect();
+    entry = probed.entry;
+    lastErr = probed.lastErr;
+    needsCookies = probed.needsCookies;
+    if (entry) writeDirectCache(cacheKey, entry);
   }
-  if (!chosen) {
+
+  if (!entry) {
     if (needsCookies && cookieArgSets.length === 0) {
       void writeParseLog({
         platform: platform || "unknown",
@@ -307,60 +512,77 @@ async function handle(request: Request): Promise<Response> {
     return new Response("stream unavailable", { status: 502, headers: CORS });
   }
 
-  void writeParseLog({
-    platform: platform || "unknown",
-    type,
-    proxy_on: !!proxy,
-    url: target,
-    status: "ok",
-    message: chosen.name,
-  });
-
-  // —— Range 直转：探测已拿到 CDN 直链（directUrl），直接转发播放器的 Range 请求。
-  //    响应透传 Content-Length / Content-Range 并声明 Accept-Ranges: bytes，
-  //    微信小程序 <video> 才能拿到时长、拖动进度（之前管道流 Accept-Ranges: none 会导致 00:00）。
-  //    CDN 一般在海外服务器上可直接访问；http(s) 代理会尝试走 undici ProxyAgent，socks5 时直连。
-  if (directUrl && request.method === "GET") {
-    try {
-      const fwdHeaders: Record<string, string> = {
-        "user-agent": chosen.ua,
-        referer: referer,
-      };
-      const range = request.headers.get("range");
-      if (range) fwdHeaders["range"] = range;
-      const fetchOpts: Record<string, unknown> = { headers: fwdHeaders, redirect: "follow" };
-      if (proxy && /^https?:\/\//i.test(proxy)) {
-        try {
-          const { ProxyAgent } = await import("undici");
-          fetchOpts.dispatcher = new ProxyAgent(proxy);
-        } catch {
-          /* 运行时没有 undici（如 Bun），退化为直连 CDN */
+  // —— Range 直转：直接把播放器/下载器的 Range 请求转发到 CDN 直链。
+  //    透传 Content-Length / Content-Range 并声明 Accept-Ranges: bytes，
+  //    手机端与小程序 <video> 才能拿到时长、拖动进度。
+  //    配了后台代理就走 CONNECT 隧道（CDN 直链与代理出口 IP 绑定，直连会被 403）。
+  if (request.method === "GET") {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const fwdHeaders: Record<string, string> = {
+          "user-agent": entry.ua,
+          referer: referer,
+        };
+        const range = request.headers.get("range");
+        if (range) fwdHeaders["range"] = range;
+        const upstream = tunnelReady
+          ? await fetchViaTunnel(entry.directUrl, fwdHeaders, proxy, request.signal)
+          : await fetch(entry.directUrl, { headers: fwdHeaders, redirect: "follow" });
+        if (upstream.ok || upstream.status === 206) {
+          const headers = new Headers(CORS);
+          const ct = upstream.headers.get("content-type") || "";
+          headers.set(
+            "Content-Type",
+            ct.startsWith("video/") || ct.startsWith("audio/") ? ct : type === "audio" ? "audio/mp4" : "video/mp4",
+          );
+          headers.set("Cache-Control", "no-store");
+          const cl = upstream.headers.get("content-length");
+          if (cl) headers.set("Content-Length", cl);
+          const cr = upstream.headers.get("content-range");
+          if (cr) headers.set("Content-Range", cr);
+          headers.set("Accept-Ranges", "bytes");
+          if (shouldDownload) {
+            headers.set("Content-Disposition", attachmentName(filename, type === "audio" ? "audio.m4a" : "video.mp4"));
+          }
+          console.log(
+            `[api/media-stream] direct forward ok status=${upstream.status} proxy=${tunnelReady ? "on" : "off"} attempt=${attempt + 1}`,
+          );
+          return new Response(upstream.body, { status: upstream.status, headers });
         }
-      }
-      const upstream = await fetch(directUrl, fetchOpts as never);
-      if (upstream.ok || upstream.status === 206) {
-        const headers = new Headers(CORS);
-        const ct = upstream.headers.get("content-type") || "";
-        headers.set(
-          "Content-Type",
-          ct.startsWith("video/") || ct.startsWith("audio/") ? ct : type === "audio" ? "audio/mp4" : "video/mp4",
+        console.error(
+          `[api/media-stream] direct forward bad status ${upstream.status} proxy=${tunnelReady ? "on" : "off"}`,
         );
-        headers.set("Cache-Control", "no-store");
-        const cl = upstream.headers.get("content-length");
-        if (cl) headers.set("Content-Length", cl);
-        const cr = upstream.headers.get("content-range");
-        if (cr) headers.set("Content-Range", cr);
-        headers.set("Accept-Ranges", "bytes");
-        if (shouldDownload) {
-          headers.set("Content-Disposition", attachmentName(filename, type === "audio" ? "audio.m4a" : "video.mp4"));
+        await upstream.body?.cancel().catch(() => {});
+        if (upstream.status === 403 || upstream.status === 404 || upstream.status === 410) {
+          directCache.delete(cacheKey);
+          if (attempt === 0) {
+            const again = await probeDirect();
+            if (again.entry) {
+              entry = again.entry;
+              writeDirectCache(cacheKey, again.entry);
+              continue;
+            }
+          }
         }
-        console.log(`[api/media-stream] direct range forward ok upstream=${upstream.status}`);
-        return new Response(upstream.body, { status: upstream.status, headers });
+        break;
+      } catch (err) {
+        console.error(
+          `[api/media-stream] direct forward failed proxy=${tunnelReady ? "on" : "off"}`,
+          (err as Error)?.message || err,
+        );
+        directCache.delete(cacheKey);
+        if (attempt === 0) {
+          const again = await probeDirect();
+          if (again.entry) {
+            entry = again.entry;
+            writeDirectCache(cacheKey, again.entry);
+            continue;
+          }
+        }
+        break;
       }
-      console.error("[api/media-stream] direct fetch bad status", upstream.status, "→ fallback to pipe");
-    } catch (err) {
-      console.error("[api/media-stream] direct fetch failed → fallback to pipe", err);
     }
+    console.error("[api/media-stream] → fallback to yt-dlp pipe");
   }
 
   const args = [
@@ -370,10 +592,10 @@ async function handle(request: Request): Promise<Response> {
     "--retries", "3",
     "--geo-bypass",
     "--add-header", `referer:${referer}`,
-    "--add-header", `user-agent:${chosen.ua}`,
+    "--add-header", `user-agent:${entry.ua}`,
   ];
-  if (chosen.extractor) args.push("--extractor-args", chosen.extractor);
-  args.push(...chosen.extra);
+  if (entry.extractor) args.push("--extractor-args", entry.extractor);
+  args.push(...entry.extra);
   if (proxy) args.push("--proxy", proxy);
   args.push("-o", "-", target);
 
