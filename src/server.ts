@@ -37,9 +37,9 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
   });
 }
 
-// 首页是纯静态 HTML，又带着内联的播放器逻辑，手机浏览器（尤其微信内置）会按
-// 「上次修改时间的 10%」做启发式缓存。改完播放器经常要等半小时才生效，
-// 用户看到的就是「你们改了但我这儿还是老样子」。给 HTML 显式声明 no-cache。
+// SSR 页面（/auth、错误页等）默认不带 Cache-Control，浏览器按「上次修改时间的 10%」
+// 做启发式缓存，改完版经常要等一阵才生效。这里统一补 no-cache。
+// 注意：/index.html 是 public/ 里的静态文件，走 nitro 的静态服务，不经过这里。
 function withHtmlNoCache(response: Response): Response {
   if (response.status === 304) return response;
   const contentType = response.headers.get("content-type") ?? "";
