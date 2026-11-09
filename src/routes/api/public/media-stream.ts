@@ -345,6 +345,12 @@ const strategyHints = new Map<string, string>();
 type ProbeResult = { entry: DirectEntry | null; lastErr: string; needsCookies: boolean };
 const inflightProbes = new Map<string, Promise<ProbeResult>>();
 
+// 落盘缓存：TikTok / IG 这类只能靠 yt-dlp 自己下载的平台，下载一次后按文件提供 Range，
+// 播放、拖动、手机端 2MB 分段保存都命中同一份文件。
+type BufferedFile = { path: string; size: number; contentType: string; expires: number };
+const bufferedFiles = new Map<string, BufferedFile>();
+const downloadTasks = new Map<string, Promise<BufferedFile>>();
+
 async function writeParseLog(row: {
   platform: string;
   type: string;
@@ -514,12 +520,18 @@ async function handle(request: Request): Promise<Response> {
     return tracked;
   }
 
-  let entry = readDirectCache(cacheKey);
+  // TikTok / Instagram 的 CDN 只认 yt-dlp 自己那次请求（链接里带签名，且依赖提取时的
+  // 会话 Cookie），用我们另开的连接去拉一律 403。这类平台不再浪费 15 秒去探测注定失败的
+  // 直链，直接走「yt-dlp 落盘 → 按文件提供 Range」。
+  const bufferedPlatform = platform === "TIKTOK" || platform === "INSTAGRAM";
+
+  let entry: DirectEntry | null = bufferedPlatform
+    ? { directUrl: "", ua: attempts[0].ua, extractor: attempts[0].extractor, extra: attempts[0].extra, expires: 0 }
+    : readDirectCache(cacheKey);
   let lastErr = "";
   let needsCookies = false;
-  if (entry) {
-    console.log("[api/media-stream] direct url cache hit", type, platform || "unknown");
-  } else {
+
+  if (!bufferedPlatform && !entry) {
     const probed = await probeDirect();
     entry = probed.entry;
     lastErr = probed.lastErr;
@@ -551,11 +563,169 @@ async function handle(request: Request): Promise<Response> {
     return new Response("stream unavailable", { status: 502, headers: CORS });
   }
 
+  const MIME: Record<string, string> = {
+    mp4: "video/mp4",
+    m4v: "video/mp4",
+    m4a: "audio/mp4",
+    webm: "video/webm",
+    weba: "audio/webm",
+    mkv: "video/x-matroska",
+    mov: "video/quicktime",
+    mp3: "audio/mpeg",
+    ogg: "audio/ogg",
+    opus: "audio/ogg",
+  };
+
+  // —— 文件缓冲：yt-dlp 自己下载（它带对了 Cookie / 签名），落盘后再按文件提供 Range。
+  //    以前这里把 yt-dlp 的 stdout 直接丢给播放器：没有 Content-Length、
+  //    Accept-Ranges: none，手机浏览器（尤其 iOS）直接播不了，也不能拖进度。
+  async function downloadBuffered(): Promise<{ path: string; size: number; contentType: string; expires: number }> {
+    const cached = bufferedFiles.get(cacheKey);
+    if (cached && cached.expires > Date.now()) {
+      const fsCheck = await import("node:fs/promises");
+      const st = await fsCheck.stat(cached.path).catch(() => null);
+      if (st && st.size === cached.size) return cached;
+      bufferedFiles.delete(cacheKey);
+    }
+    const running = downloadTasks.get(cacheKey);
+    if (running) return running;
+
+    const task = (async () => {
+      const fsMod = await import("node:fs/promises");
+      const pathMod = await import("node:path");
+      const { createHash } = await import("node:crypto");
+      const dir = "/tmp/media-cache";
+      await fsMod.mkdir(dir, { recursive: true });
+      // 顺手清掉 30 分钟前的缓存文件，别把容器写满
+      try {
+        for (const f of await fsMod.readdir(dir)) {
+          const p = pathMod.join(dir, f);
+          const st = await fsMod.stat(p).catch(() => null);
+          if (st && Date.now() - st.mtimeMs > 30 * 60_000) await fsMod.unlink(p).catch(() => {});
+        }
+      } catch {}
+
+      const base = pathMod.join(dir, createHash("sha1").update(cacheKey).digest("hex").slice(0, 20));
+      const dlArgs = [
+        "-f", format,
+        "--no-warnings", "--no-check-certificates",
+        "--socket-timeout", "30",
+        "--retries", "3",
+        "--geo-bypass",
+        "--add-header", `referer:${referer}`,
+        "--add-header", `user-agent:${entry!.ua}`,
+      ];
+      if (entry!.extractor) dlArgs.push("--extractor-args", entry!.extractor);
+      dlArgs.push(...entry!.extra);
+      if (proxy) dlArgs.push("--proxy", proxy);
+      dlArgs.push("-o", `${base}.%(ext)s`, target);
+
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn(configuredPath, dlArgs, {
+          stdio: ["ignore", "ignore", "pipe"],
+          env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+        });
+        let stderr = "";
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk.toString("utf8");
+          if (stderr.length > 4000) stderr = stderr.slice(-4000);
+        });
+        const timer = setTimeout(() => {
+          try { child.kill("SIGTERM"); } catch {}
+          reject(new Error("download timeout"));
+        }, 170_000);
+        child.on("error", (err) => { clearTimeout(timer); reject(err); });
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          if (code === 0) resolve();
+          else reject(new Error(redactSensitive(stderr, proxy) || `yt-dlp exit ${code}`));
+        });
+      });
+
+      const prefix = pathMod.basename(base) + ".";
+      const produced = (await fsMod.readdir(dir)).filter((f) => f.startsWith(prefix));
+      if (!produced.length) throw new Error("download produced no file");
+      const file = pathMod.join(dir, produced[0]);
+      const st = await fsMod.stat(file);
+      if (!st.size) throw new Error("empty media file");
+      const ext = pathMod.extname(file).slice(1).toLowerCase();
+      const info = {
+        path: file,
+        size: st.size,
+        contentType: MIME[ext] || (type === "audio" ? "audio/mp4" : "video/mp4"),
+        expires: Date.now() + 20 * 60_000,
+      };
+      bufferedFiles.set(cacheKey, info);
+      console.log(
+        `[api/media-stream] buffered platform=${platform || "unknown"} type=${type} size=${(st.size / 1048576).toFixed(1)}MB`,
+      );
+      return info;
+    })().finally(() => {
+      downloadTasks.delete(cacheKey);
+    });
+
+    downloadTasks.set(cacheKey, task);
+    return task;
+  }
+
+  async function serveBuffered(
+    info: { path: string; size: number; contentType: string },
+    rangeHeader: string | null,
+  ): Promise<Response> {
+    const headers = new Headers(CORS);
+    headers.set("Content-Type", info.contentType);
+    headers.set("Accept-Ranges", "bytes");
+    headers.set("Cache-Control", "no-store");
+    if (shouldDownload) {
+      headers.set("Content-Disposition", attachmentName(filename, type === "audio" ? "audio.m4a" : "video.mp4"));
+    }
+    let start = 0;
+    let end = info.size - 1;
+    let status = 200;
+    if (rangeHeader) {
+      const m = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim());
+      if (!m || (m[1] === "" && m[2] === "")) {
+        headers.set("Content-Range", `bytes */${info.size}`);
+        return new Response(null, { status: 416, headers });
+      }
+      if (m[1] === "") {
+        const suffix = Number(m[2]) || 0;
+        start = Math.max(0, info.size - suffix);
+      } else {
+        start = Number(m[1]);
+        if (m[2]) end = Math.min(Number(m[2]), info.size - 1);
+      }
+      if (!Number.isFinite(start) || start >= info.size || start > end) {
+        headers.set("Content-Range", `bytes */${info.size}`);
+        return new Response(null, { status: 416, headers });
+      }
+      status = 206;
+      headers.set("Content-Range", `bytes ${start}-${end}/${info.size}`);
+    }
+    headers.set("Content-Length", String(end - start + 1));
+    const fsMod = await import("node:fs");
+    const nodeStream = await import("node:stream");
+    const body = nodeStream.Readable.toWeb(
+      fsMod.createReadStream(info.path, { start, end }),
+    ) as unknown as ReadableStream<Uint8Array>;
+    return new Response(body, { status, headers });
+  }
+
   // —— Range 直转：直接把播放器/下载器的 Range 请求转发到 CDN 直链。
   //    透传 Content-Length / Content-Range 并声明 Accept-Ranges: bytes，
   //    手机端与小程序 <video> 才能拿到时长、拖动进度。
   //    配了后台代理就走 CONNECT 隧道（CDN 直链与代理出口 IP 绑定，直连会被 403）。
   if (request.method === "GET") {
+    if (bufferedPlatform) {
+      try {
+        const info = await downloadBuffered();
+        return await serveBuffered(info, request.headers.get("range"));
+      } catch (err) {
+        console.error("[api/media-stream] buffered download failed", redactSensitive((err as Error)?.message, proxy));
+        return new Response("stream unavailable", { status: 502, headers: CORS });
+      }
+    }
+
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const fwdHeaders: Record<string, string> = {
@@ -594,7 +764,7 @@ async function handle(request: Request): Promise<Response> {
         await upstream.body?.cancel().catch(() => {});
         if (upstream.status === 403 || upstream.status === 404 || upstream.status === 410) {
           directCache.delete(cacheKey);
-          if (attempt === 0) {
+          if (attempt === 0 && !bufferedPlatform) {
             const again = await probeDirect();
             if (again.entry) {
               entry = again.entry;
@@ -610,20 +780,19 @@ async function handle(request: Request): Promise<Response> {
           (err as Error)?.message || err,
         );
         directCache.delete(cacheKey);
-        if (attempt === 0) {
-          const again = await probeDirect();
-          if (again.entry) {
-            entry = again.entry;
-            writeDirectCache(cacheKey, again.entry);
-            continue;
-          }
-        }
         break;
       }
     }
-    console.error("[api/media-stream] → fallback to yt-dlp pipe");
+    console.error("[api/media-stream] → fallback to buffered download");
+    try {
+      const info = await downloadBuffered();
+      return await serveBuffered(info, request.headers.get("range"));
+    } catch (err) {
+      console.error("[api/media-stream] buffered download failed", redactSensitive((err as Error)?.message, proxy));
+    }
   }
 
+  // 最后的兜底：直接把 yt-dlp 的 stdout 交给播放器（没有长度、不能拖动，聊胜于无）
   const args = [
     "-f", format,
     "--no-warnings", "--no-check-certificates",

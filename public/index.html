@@ -62,6 +62,12 @@
             touch-action: manipulation;
         }
         *, *::before, *::after { box-sizing: border-box; }
+        /* iOS 只在字号 <16px 时自动放大输入框所在页面；统一兜住，避免各处漏改。 */
+        @media (max-width: 640px) {
+            input:not([type="checkbox"]):not([type="radio"]), textarea, select {
+                font-size: 16px !important;
+            }
+        }
         img, video { max-width: 100%; height: auto; }
         body {
             background-color: #0f172a;
@@ -304,7 +310,10 @@
                 border-color: rgba(69,215,131,.35) !important;
                 border-radius: 11px !important;
                 background: #0f1526 !important;
-                font-size: 13px !important;
+                /* 必须 ≥16px：iOS Safari 在输入框获得焦点时，如果字号小于 16px
+                   会把整个页面自动放大，点输入框、“粘贴”、以及点 X 清空（会 focus）
+                   都会把页面顶大，用户还得手动缩回去。 */
+                font-size: 16px !important;
             }
             #submit-btn {
                 min-height: 45px;
