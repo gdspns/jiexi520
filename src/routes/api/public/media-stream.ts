@@ -228,7 +228,9 @@ async function getTunnelAgent(proxyUrl: URL, secure: boolean, hostname: string, 
     });
 
   const AgentCtor = secure ? httpsMod.Agent : httpMod.Agent;
-  const agent: any = new AgentCtor({ keepAlive: true, maxSockets: 4 });
+  // 不复用连接：代理给的是 CONNECT 隧道，长连接被代理侧掐断时不会通知前端，
+  // 表现就是「读到一半卡住」。每个分段都新建隧道，代价约 0.6s，换稳定。
+  const agent: any = new AgentCtor({ keepAlive: false, maxSockets: 8 });
   // 必须用回调形式：Agent 会把返回值当成 socket，返回 Promise 会导致连接错乱
   agent.createConnection = (_opts: unknown, cb: (err: Error | null, socket?: unknown) => void) => {
     openTunnel().then(
@@ -282,7 +284,8 @@ async function fetchViaTunnel(
       },
     );
     req.on("error", reject);
-    req.setTimeout(30_000, () => req.destroy(new Error("upstream timeout")));
+    // 上游沉默 15 秒就断开，客户端能立刻换线路重试，而不是干等到 40 秒超时
+    req.setTimeout(15_000, () => req.destroy(new Error("upstream idle timeout")));
     if (signal) {
       if (signal.aborted) req.destroy();
       else signal.addEventListener("abort", () => req.destroy(), { once: true });
