@@ -138,7 +138,7 @@ async function readSetting(key: string): Promise<string> {
     );
     const data = (result as { data?: { value?: unknown } | null } | null)?.data;
     const value = data?.value;
-    console.log(`[media-cleanup] read ${key} ${Date.now() - started}ms`);
+    if (Date.now() - started > 3000) console.log(`[media-cleanup] slow read ${key} ${Date.now() - started}ms`);
     return typeof value === "string" ? value : value == null ? "" : String(value);
   } catch (err) {
     console.error("[media-cleanup] read setting failed", key, (err as Error)?.message);
@@ -360,17 +360,8 @@ export async function runCleanup(trigger: string): Promise<CleanupRun> {
 const TICK_MS = 30_000;
 
 async function tick() {
-  try {
-    console.log("[media-cleanup] tick");
-  } catch {
-    /* ignore */
-  }
   const config = await loadCleanupConfig();
-  console.log(`[media-cleanup] config enabled=${config.enabled} interval=${config.intervalMinutes}min`);
-  if (!config.enabled) {
-    console.log("[media-cleanup] tick skipped: disabled");
-    return;
-  }
+  if (!config.enabled) return;
   await loadPersistedRun();
   const lastAt = lastRun.at ? Date.parse(lastRun.at) : 0;
   const due = Date.now() - lastAt >= config.intervalMinutes * 60_000;
@@ -392,8 +383,12 @@ export function startCleanupScheduler(): void {
     /* 不支持的运行时忽略 */
   }
   host[SWEEP_TIMER_KEY] = { timer, startedAt: Date.now() };
-  // 部署完成立刻清一次（users 不用等满一个周期），失败也不影响服务
-  void tick().catch((err) => console.error("[media-cleanup] boot tick failed", (err as Error)?.message));
+  // 部署完成立刻清一次（不等满一个周期）：新容器 /tmp 是空的，但同机重启／热更新时
+  // 可能留着上一轮文件，顺手收干净。失败不影响服务。
+  void (async () => {
+    await loadPersistedRun();
+    await runCleanup("boot");
+  })().catch((err) => console.error("[media-cleanup] boot run failed", (err as Error)?.message));
   console.log(`[media-cleanup] scheduler started tick=${TICK_MS / 1000}s dir=${MEDIA_CACHE_DIR}`);
 }
 
