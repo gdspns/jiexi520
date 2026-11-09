@@ -1993,6 +1993,173 @@
             }
         }
 
+        /* MP4-DATE-PATCH-START */
+        // 手机相册是按「视频拍摄时间」归档的：陌陌/快手这类站点的 mp4 里写死了
+        // 发布当天的创建时间（陌陌这条是 2026-07-25），存进相册后不会出现在
+        // 「最近」顶部，而是被塞回到 7 月那一段里 —— 用户滑两下没看到，就会说
+        // 「弹出存储视频了，但相册里没有，应该没存下来」。抖音的片子一般没有
+        // 这个时间戳，所以同样的操作在抖音上是"正常"的。
+        // 这里在把文件交给系统之前，把 mvhd/tkhd/mdhd 的创建/修改时间改成当前，
+        // 系统导入后就会排在相册最前面。
+        const MP4_QT_EPOCH_OFFSET = 2082844800; // 1904-01-01 → 1970-01-01 的秒数差
+
+        function mp4ByteField(parts) {
+            const starts = [];
+            let total = 0;
+            for (const part of parts) { starts.push(total); total += part.length; }
+            // 分片起点有序，二分找 offset 落在哪一片
+            const locate = (offset) => {
+                let lo = 0, hi = starts.length - 1;
+                while (lo < hi) {
+                    const mid = (lo + hi + 1) >> 1;
+                    if (starts[mid] <= offset) lo = mid; else hi = mid - 1;
+                }
+                return lo;
+            };
+            return {
+                total,
+                read(offset, length) {
+                    const out = new Uint8Array(length);
+                    let filled = 0;
+                    while (filled < length) {
+                        const index = locate(offset + filled);
+                        const inPart = offset + filled - starts[index];
+                        const take = Math.min(length - filled, parts[index].length - inPart);
+                        out.set(parts[index].subarray(inPart, inPart + take), filled);
+                        filled += take;
+                    }
+                    return out;
+                },
+                writeU32(offset, value) {
+                    for (let k = 0; k < 4; k++) {
+                        const index = locate(offset + k);
+                        parts[index][offset + k - starts[index]] = (value >>> (24 - k * 8)) & 0xff;
+                    }
+                },
+            };
+        }
+
+        function readBoxHeader(field, offset) {
+            if (offset + 8 > field.total) return null;
+            const head = field.read(offset, 16);
+            let size = ((head[0] << 24) | (head[1] << 16) | (head[2] << 8) | head[3]) >>> 0;
+            const type = String.fromCharCode(head[4], head[5], head[6], head[7]);
+            let header = 8;
+            if (size === 1 && offset + 16 <= field.total) {
+                const low = ((head[12] << 24) | (head[13] << 16) | (head[14] << 8) | head[15]) >>> 0;
+                size = head[8] * 4294967296 + low;
+                header = 16;
+            } else if (size === 0) {
+                size = field.total - offset;
+            }
+            if (size < header) return null;
+            return { size, type, header };
+        }
+
+        // 把 moov 里 mvhd/tkhd/mdhd 的时间戳改成当前时间；失败就原样返回，
+        // 绝不能让"改时间"这一步把好好的视频弄坏。
+        function stampMp4CreatedNow(parts) {
+            try {
+                if (!parts || !parts.length) return false;
+                const field = mp4ByteField(parts);
+                if (field.total < 32) return false;
+                const nowQt = Math.floor(Date.now() / 1000) + MP4_QT_EPOCH_OFFSET;
+
+                let moovStart = -1;
+                let moovEnd = -1;
+                for (let offset = 0, guard = 0; offset + 8 <= field.total && guard < 64; guard++) {
+                    const box = readBoxHeader(field, offset);
+                    if (!box) break;
+                    if (box.type === 'moov') {
+                        moovStart = offset + box.header;
+                        moovEnd = Math.min(field.total, offset + box.size);
+                        break;
+                    }
+                    offset += box.size;
+                }
+                if (moovStart < 0) return false;
+
+                // mvhd 在 moov 下，tkhd 在 trak 下，mdhd 在 trak/mdia 下，必须逐层下钻
+                const containers = { moov: 1, trak: 1, mdia: 1, minf: 1, stbl: 1, edts: 1, dinf: 1, udta: 1 };
+                let hit = 0;
+                const patchTimeBox = (pos) => {
+                    const payload = pos + 8 + 4; // size(4) + type(4) + version(1) + flags(3)
+                    const version = field.read(pos + 8, 1)[0];
+                    if (version === 1) {
+                        // 64 位时间
+                        const high = Math.floor(nowQt / 4294967296) >>> 0;
+                        const low = (nowQt - Math.floor(nowQt / 4294967296) * 4294967296) >>> 0;
+                        for (const base of [payload, payload + 8]) {
+                            field.writeU32(base, high);
+                            field.writeU32(base + 4, low);
+                        }
+                    } else {
+                        field.writeU32(payload, nowQt);
+                        field.writeU32(payload + 4, nowQt);
+                    }
+                    hit += 1;
+                };
+                const walkBoxes = (from, to, depth) => {
+                    if (depth > 6) return;
+                    for (let pos = from; pos + 12 <= to;) {
+                        const box = readBoxHeader(field, pos);
+                        if (!box || pos + box.size > to) { pos += 4; continue; } // 读不懂就逐字节试探
+                        if (box.type === 'mvhd' || box.type === 'tkhd' || box.type === 'mdhd') {
+                            patchTimeBox(pos);
+                        } else if (containers[box.type]) {
+                            walkBoxes(pos + box.header, pos + box.size, depth + 1);
+                        }
+                        pos += box.size;
+                    }
+                };
+                walkBoxes(moovStart, moovEnd, 0);
+                return hit > 0;
+            } catch (e) {
+                return false;
+            }
+        }
+        /* MP4-DATE-PATCH-END */
+
+        // 问清楚「这段视频到底多大、能不能分段取」。
+        // 只靠 Range 探测不可靠：跨域时 Content-Range 默认不可读，只能退回
+        // HEAD 的 Content-Length（Content-Length 属于 CORS 安全头，永远可读）。
+        async function fetchMediaInfo(url, signal) {
+            let total = 0;
+            let ranges = false;
+            try {
+                const { response } = await fetchRangeBuffer(url, 0, 1, signal, 10000);
+                const contentRange = response.headers.get('Content-Range') || '';
+                const fromRange = Number(contentRange.split('/')[1] || 0);
+                if (fromRange) {
+                    total = fromRange;
+                    ranges = true;
+                } else if (response.status === 200) {
+                    // 服务器忽略了 Range，直接给了整包
+                    total = Number(response.headers.get('Content-Length') || 0);
+                    ranges = false;
+                } else {
+                    // 206 但读不到 Content-Range（跨域未暴露），长度另问
+                    ranges = true;
+                }
+            } catch (error) {
+                if (error?.name === 'AbortError') throw error;
+            }
+            if (!total || !ranges) {
+                try {
+                    const head = await fetch(url, {
+                        method: 'HEAD', cache: 'no-store', referrerPolicy: 'no-referrer', signal,
+                    });
+                    const length = Number(head.headers.get('Content-Length') || 0);
+                    const acceptRanges = (head.headers.get('Accept-Ranges') || '').toLowerCase();
+                    if (!total && head.ok && length) total = length;
+                    if (/bytes/.test(acceptRanges)) ranges = true;
+                } catch (error) {
+                    if (error?.name === 'AbortError') throw error;
+                }
+            }
+            return { total, ranges: ranges && total > 0 };
+        }
+
         // 读取视频做「存入相册」用。核心策略：
         //   1) 先直连 CDN（抖音/快手等 CDN 有 CORS，速度是绕服务器的几十倍，
         //      只有够快才能在用户点击的那一下里把文件交给系统分享）；
@@ -2032,8 +2199,13 @@
                 if (!(await tryRefresh())) throw lastError || new Error('视频读取失败');
             }
 
-            const contentRange = probe.response.headers.get('Content-Range') || '';
-            const total = Number(contentRange.split('/')[1] || probe.response.headers.get('Content-Length') || 0);
+            // 总长度必须单独确认：跨域直连时 Content-Range 不在
+            // Access-Control-Expose-Headers 里，浏览器根本读不到（抖音暴露了，
+            // 陌陌没暴露）。旧代码拿不到就去读 Content-Length，而探测用的是
+            // bytes=0-0，于是「整个视频」被当成 1 字节：只下载 1 个字节、
+            // 拼出一个空文件交给系统，用户那边就是「弹出存储视频了，相册里没有」。
+            const info = await fetchMediaInfo(src, signal);
+            const total = info.total;
 
             // 超过 memLimit 就不再读进内存：手机上这么干会被系统直接杀掉页面。
             const memLimit = Number(options.maxBytes || 0);
@@ -2043,8 +2215,8 @@
                 throw err;
             }
 
-            // 源站不支持分段：只能整包流式读取
-            if (probe.response.status !== 206 || !total) {
+            // 源站不支持分段 / 长度问不到：只能整包流式读取
+            if (!info.ranges || !total) {
                 const response = await fetch(src, { cache: 'no-store', referrerPolicy: 'no-referrer', signal });
                 if (!response.ok) throw new Error('视频读取失败（' + response.status + '）');
                 const length = Number(response.headers.get('Content-Length') || 0);
@@ -2070,6 +2242,8 @@
                     }
                     onProgress(length ? (received / length) * 100 : null, received);
                 }
+                // 交给相册前把视频时间改成现在，否则会被归档到拍摄那天（见 stampMp4CreatedNow）
+                stampMp4CreatedNow(chunks);
                 return new Blob(chunks, { type: 'video/mp4' });
             }
 
@@ -2086,6 +2260,9 @@
                     for (const candidate of order) {
                         try {
                             const { buf: part } = await fetchRangeBuffer(candidate, start, end, signal, 40000);
+                            // 分段长度必须对得上：要是 CDN 忽略了 Range 直接回整包，
+                            // 拼出来的文件就是坏的（相册导入会失败，用户还以为是没保存）。
+                            if (part.length !== end - start + 1) throw new Error('分段长度不符');
                             buf = part;
                             src = candidate;
                             break;
@@ -2103,6 +2280,8 @@
                 received += buf.length;
                 onProgress((received / total) * 100, received);
             }
+            // 交给相册前把视频时间改成现在，否则会被归档到拍摄那天（见 stampMp4CreatedNow）
+            stampMp4CreatedNow(parts);
             return new Blob(parts, { type: 'video/mp4' });
         }
 
@@ -2282,19 +2461,14 @@
             overlay.querySelector('.save-close').addEventListener('click', close);
             overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
 
-            // 量一下文件大小：只读 1 个字节，几乎不耗流量
+            // 量一下文件大小：只读 2 个字节 + 一次 HEAD，几乎不耗流量
             let totalBytes = 0;
-            const readTotal = (resp) => {
-                const cr = resp.headers.get('Content-Range') || '';
-                return Number(cr.split('/')[1] || resp.headers.get('Content-Length') || 0) || 0;
-            };
             try {
                 // 直连优先（抖音 CDN 允许跨域且快得多），失败再试本站代理
                 for (const candidate of buildMediaSources(url)) {
                     try {
-                        const probe = await fetchRangeBuffer(candidate, 0, 0, null, 8000);
-                        totalBytes = readTotal(probe.response);
-                        if (totalBytes) break;
+                        const info = await fetchMediaInfo(candidate, null);
+                        if (info.total) { totalBytes = info.total; break; }
                     } catch (e) {}
                 }
             } catch (e) {}
@@ -2328,7 +2502,9 @@
                     // iOS 上「下载」只会落到“文件”App，不是相册，所以是次要选项
                     directLink.className = 'save-direct ' + secondaryCls;
                     directLink.innerHTML = '下载到「文件」（.mp4）';
-                    hintEl.textContent = '系统菜单里没有「存储视频」？点「在浏览器打开视频」，长按画面 → 存储照片。';
+                    // 存完找不到是最高频的反馈：相册按拍摄时间排序，原视频的时间戳
+                    // 可能是一个月前，玩家滑两下没看到就以为没存上，这里直接说明位置。
+                    hintEl.textContent = '存好后到《照片》→「最近」最上面就能看到（已把视频时间改成今天）；还是没有，就点「在浏览器打开视频」，长按画面 → 存储照片。';
                 } else {
                     // 小于 iOS 16.4 或大文件：分享不可用，最稳的是原生播放器长按保存
                     shareBtn.style.display = 'none';
@@ -2480,8 +2656,13 @@
                         const file = new File([blob], finalName, { type: 'video/mp4' });
                         if (navigator.canShare && navigator.canShare({ files: [file] })) {
                             await navigator.share({ files: [file], title: finalName });
-                            showToast('✅ 请在系统菜单中选择「存储视频」', 'success');
-                            close();
+                            // 分享面板关掉后不能判断用户到底点了哪个（navigator.share
+                            // 只要面板关闭就 resolve），所以不自动关弹窗：万一相册里
+                            // 没找到，用户回来还能看到下一步怎么走。
+                            progressWrap.classList.add('hidden');
+                            tipEl.textContent = '已调起系统菜单，选「存储视频」即可。';
+                            hintEl.textContent = '相册里没看到？到《照片》→「最近」最上面找（视频时间已改成今天）；还是没有就点「在浏览器打开视频」，长按画面 → 存储照片。';
+                            showToast('✅ 已调起系统菜单，请选择「存储视频」', 'success');
                             return;
                         }
                         throw new Error('当前浏览器不支持直接分享');
