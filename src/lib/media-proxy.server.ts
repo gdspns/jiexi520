@@ -85,7 +85,10 @@ export const PROXY_CORS = {
 /** 去掉文件名里会破坏响应头 / 磁盘名的字符，并强制 mp4 扩展名 */
 export function toMp4Name(name: string | null | undefined, fallback = "video.mp4"): string {
   const base = String(name || "")
-    .replace(/[\\/:*?"<>|\r\n]/g, "")
+    // 控制字符（标题里常见的换行）在响应头和部分系统文件管理器里是非法字符
+    .replace(/[\u0000-\u001F\u007F\u200B-\u200F\u2028\u2029\uFEFF]/g, "")
+    .replace(/[\\/:*?"<>|]/g, "")
+    .replace(/\s+/g, " ")
     .trim()
     .slice(0, 90);
   const safe = base || fallback;

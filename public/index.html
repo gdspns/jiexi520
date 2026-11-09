@@ -1401,6 +1401,19 @@
             return '/api/public/media-proxy?type=video&url=' + encodeURIComponent(u);
         }
 
+        // 读取视频时的候选源顺序：**先直连 CDN，再退回本站代理**。
+        // 抖音/快手这类 CDN 允许跨域（Access-Control-Allow-Origin: *），手机直连
+        // 是几十 MB/s，而服务器到同一台 CDN 只有几百 KB/s——绕一圈要多花十几秒，
+        // 系统分享的手势早就过期了，用户看到的就是「点了没反应、没有存储视频」。
+        // 直连失败（跨域被拒 / 防盗链 403）时再逐级退回代理。
+        function buildMediaSources(u) {
+            const list = [];
+            if (/^https?:\/\//i.test(String(u || ''))) list.push(u);
+            const proxied = proxifyVideo(u);
+            if (proxied && !list.includes(proxied)) list.push(proxied);
+            return list;
+        }
+
         // ================= 桌面端内嵌视频预览 =================
         // 解析成功后信息卡下方直接显示视频，点击即可播放，不再必须打开「在线观看」弹窗。
         // 线路策略与手机端一致：直连 CDN → 同源代理 → 转码兜底，失败自动降级。
@@ -1887,9 +1900,33 @@
         }
 
         // 统一成 .mp4 结尾的文件名
+        // 用 new RegExp 而不是正则字面量：老版本 Safari 不认 \p{...}，
+        // 字面量会在解析阶段直接抛语法错误，把整页脚本搞挂。
+        const EMOJI_STRIP_RE = (() => {
+            try {
+                return new RegExp('[\\p{Extended_Pictographic}\\u{1F1E6}-\\u{1F1FF}\\uFE0F\\u200D]', 'gu');
+            } catch (e) {
+                return /[\uD800-\uDFFF]/g; // 退化成"删掉所有代理对字符"
+            }
+        })();
+
         function ensureMp4Name(name) {
-            const cleaned = String(name || 'video.mp4').replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 60) || 'video.mp4';
-            return /\.(mp4|m4v|mov)$/i.test(cleaned) ? cleaned : cleaned + '.mp4';
+            // 抖音/小红书的标题经常带换行、零宽字符和各种 emoji：文件名里出现
+            // 控制字符后，iOS 系统分享会判定成"不认识的类型"，菜单里就没有
+            // 「存储视频」这一项（只给"存储到文件"）。所以这里彻底清洗：
+            //   控制符 / 零宽字符 → 删；emoji → 删；连续空白 → 一个空格；
+            //   按码点截断（不能把 emoji 的代理对切成半个字符）。
+            let base = String(name || '')
+                .replace(/[\u0000-\u001F\u007F\u200B-\u200F\u2028\u2029\uFEFF]/g, '')
+                .replace(/[\\/:*?"<>|]/g, '')
+                .replace(EMOJI_STRIP_RE, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            const chars = Array.from(base);
+            if (chars.length > 60) base = chars.slice(0, 60).join('');
+            base = base.replace(/[.\s]+$/, '');
+            if (!base) base = 'video';
+            return /\.(mp4|m4v|mov)$/i.test(base) ? base : base + '.mp4';
         }
 
         // 同源下载地址：服务端带 Content-Disposition，交由浏览器下载管理器流式落盘，
@@ -1938,6 +1975,9 @@
                 const response = await fetch(url, {
                     headers: { Range: `bytes=${start}-${end}` },
                     cache: 'no-store',
+                    // 抖音/快手/小红书的 CDN 会按 Referer 防盗链：带上我们站点的地址
+                    // 直接 403，不带 Referer 反而放行。直连 CDN 时必须剥掉 Referer。
+                    referrerPolicy: 'no-referrer',
                     signal: controller.signal,
                 });
                 if (response.status !== 206 && response.status !== 200) {
@@ -1953,36 +1993,44 @@
             }
         }
 
-        // 通过同源代理分块读取视频：不会有跨域预检，也带上了正确的 Referer。
-        // options.refresh: 直链过期（403/410）时用它换取新链接，然后从当前断点续传，
-        // 已经下载的部分不丢——这是"保存到一半就失败"的修复点。
+        // 读取视频做「存入相册」用。核心策略：
+        //   1) 先直连 CDN（抖音/快手等 CDN 有 CORS，速度是绕服务器的几十倍，
+        //      只有够快才能在用户点击的那一下里把文件交给系统分享）；
+        //   2) 直连不行（跨域被拒 / 防盗链 403）再退回同源代理；
+        //   3) 直链过期（403/410）用 refresh 换新链，从当前断点续传，已下载的不丢。
         async function fetchMediaBlob(url, onProgress, signal, options = {}) {
             const refresh = typeof options.refresh === 'function' ? options.refresh : null;
-            let src = proxifyVideo(url);
+            let sources = buildMediaSources(url);
+            let src = sources[0];
             let refreshed = 0;
+            // 换链后重建候选（直连 + 代理），返回是否成功
             const tryRefresh = async () => {
                 if (!refresh || refreshed >= 3) return false;
                 refreshed += 1;
                 const fresh = await refresh();
                 if (!fresh) return false;
-                src = proxifyVideo(fresh);
+                sources = buildMediaSources(fresh);
+                src = sources[0];
                 return true;
             };
 
             let probe = null;
-            for (let attempt = 0; attempt < 4; attempt++) {
-                try {
-                    probe = await fetchRangeBuffer(src, 0, 0, signal, 25000);
-                    break;
-                } catch (error) {
-                    if (error?.name === 'AbortError') throw error;
-                    const status = Number(error?.status || 0);
-                    if ((status === 403 || status === 410 || status === 404) && await tryRefresh()) continue;
-                    if (attempt === 3) throw error;
-                    await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+            let lastError = null;
+            // 依次试每个候选源；都失败再考虑换链重试
+            while (!probe) {
+                for (const candidate of sources) {
+                    try {
+                        src = candidate;
+                        probe = await fetchRangeBuffer(candidate, 0, 0, signal, 12000);
+                        break;
+                    } catch (error) {
+                        if (error?.name === 'AbortError') throw error;
+                        lastError = error;
+                    }
                 }
+                if (probe) break;
+                if (!(await tryRefresh())) throw lastError || new Error('视频读取失败');
             }
-            if (!probe) throw new Error('视频读取失败');
 
             const contentRange = probe.response.headers.get('Content-Range') || '';
             const total = Number(contentRange.split('/')[1] || probe.response.headers.get('Content-Length') || 0);
@@ -1997,7 +2045,7 @@
 
             // 源站不支持分段：只能整包流式读取
             if (probe.response.status !== 206 || !total) {
-                const response = await fetch(src, { cache: 'no-store', signal });
+                const response = await fetch(src, { cache: 'no-store', referrerPolicy: 'no-referrer', signal });
                 if (!response.ok) throw new Error('视频读取失败（' + response.status + '）');
                 const length = Number(response.headers.get('Content-Length') || 0);
                 if (memLimit && length > memLimit) {
@@ -2032,16 +2080,24 @@
                 const end = Math.min(total - 1, start + chunkSize - 1);
                 let buf = null;
                 for (let attempt = 0; attempt < 6 && !buf; attempt++) {
-                    try {
-                        const { buf: part } = await fetchRangeBuffer(src, start, end, signal, 40000);
-                        buf = part;
-                    } catch (error) {
-                        if (error?.name === 'AbortError') throw error;
-                        const status = Number(error?.status || 0);
-                        if ((status === 403 || status === 410 || status === 404) && await tryRefresh()) continue;
-                        if (attempt === 5) throw error;
-                        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+                    // 每一片都先试当前源，再试其它候选（直连 ↔ 代理），
+                    // 某条线路中途抽风也不会让整次保存失败。
+                    const order = [src, ...sources.filter((s) => s !== src)];
+                    for (const candidate of order) {
+                        try {
+                            const { buf: part } = await fetchRangeBuffer(candidate, start, end, signal, 40000);
+                            buf = part;
+                            src = candidate;
+                            break;
+                        } catch (error) {
+                            if (error?.name === 'AbortError') throw error;
+                            lastError = error;
+                        }
                     }
+                    if (buf) break;
+                    if (await tryRefresh()) continue;
+                    if (attempt === 5) throw lastError || new Error('视频读取失败');
+                    await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
                 }
                 parts.push(buf);
                 received += buf.length;
@@ -2233,16 +2289,15 @@
                 return Number(cr.split('/')[1] || resp.headers.get('Content-Length') || 0) || 0;
             };
             try {
-                const probe = await fetchRangeBuffer(proxifyVideo(url), 0, 0, null, 12000);
-                totalBytes = readTotal(probe.response);
-            } catch (e) {
-                // 服务器中转慢/失败时，直连 CDN 量一次大小（CDN 允许跨域 Range）。
-                // 量不到也不要紧：后面 fetchMediaBlob 会按上限兜底，超了自动换不占内存的方案。
-                try {
-                    const direct = await fetchRangeBuffer(url, 0, 0, null, 8000);
-                    totalBytes = readTotal(direct.response);
-                } catch (e2) {}
-            }
+                // 直连优先（抖音 CDN 允许跨域且快得多），失败再试本站代理
+                for (const candidate of buildMediaSources(url)) {
+                    try {
+                        const probe = await fetchRangeBuffer(candidate, 0, 0, null, 8000);
+                        totalBytes = readTotal(probe.response);
+                        if (totalBytes) break;
+                    } catch (e) {}
+                }
+            } catch (e) {}
             if (!overlay.isConnected) return;
             sizeEl.textContent = totalBytes ? '视频大小 ' + formatSize(totalBytes) : '';
 
@@ -2354,12 +2409,32 @@
             };
             const getBlob = () => (prefetchedBlob ? Promise.resolve(prefetchedBlob) : startPrefetch());
 
-            if (shareMode && totalBytes > 0 && totalBytes <= MOBILE_PREFETCH_LIMIT) {
+            if (shareMode && totalBytes <= MOBILE_PREFETCH_LIMIT) {
+                // 只要还没备好，就把按钮禁掉并显示进度：用户一旦抢在读取完成前
+                // 点击，await 完再调 navigator.share 手势已过期，系统菜单直接不弹，
+                // 表现就是「点了没反应」，这比让用户多等几秒糟糕得多。
                 progressWrap.classList.remove('hidden');
                 statusEl.textContent = '正在准备视频…';
+                const originalLabel = shareBtn.textContent;
+                shareBtn.disabled = true;
+                shareBtn.style.opacity = '0.65';
+                shareBtn.textContent = '正在准备视频…';
                 startPrefetch()
-                    .then(() => { if (overlay.isConnected) { progressWrap.classList.add('hidden'); shareBtn.textContent = env.isIOS ? '存入相册（推荐）' : '分享 / 存到相册'; } })
-                    .catch(() => { if (overlay.isConnected) progressWrap.classList.add('hidden'); });
+                    .then(() => {
+                        if (!overlay.isConnected) return;
+                        progressWrap.classList.add('hidden');
+                        shareBtn.disabled = false;
+                        shareBtn.style.opacity = '';
+                        shareBtn.textContent = originalLabel;
+                    })
+                    .catch(() => {
+                        if (!overlay.isConnected) return;
+                        progressWrap.classList.add('hidden');
+                        // 预读失败也放开按钮：用户点击时再试一次（会走代理兜底）
+                        shareBtn.disabled = false;
+                        shareBtn.style.opacity = '';
+                        shareBtn.textContent = originalLabel;
+                    });
             }
 
             // 弹窗停留过久，原直链多半已过期：点下载前先换一条新链，
