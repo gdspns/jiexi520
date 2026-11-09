@@ -576,6 +576,91 @@ async function handle(request: Request): Promise<Response> {
     opus: "audio/ogg",
   };
 
+  async function runFfmpeg(args: string[], timeoutMs: number): Promise<void> {
+    const bin = process.env.FFMPEG_PATH || "/usr/bin/ffmpeg";
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(bin, args, { stdio: ["ignore", "ignore", "pipe"] });
+      let stderr = "";
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString("utf8");
+        if (stderr.length > 2000) stderr = stderr.slice(-2000);
+      });
+      const timer = setTimeout(() => {
+        try { child.kill("SIGTERM"); } catch {}
+        reject(new Error("ffmpeg timeout"));
+      }, timeoutMs);
+      child.on("error", (err) => { clearTimeout(timer); reject(err); });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg exit ${code}: ${stderr.slice(-400)}`));
+      });
+    });
+  }
+
+  async function probeCodec(file: string): Promise<{ codec: string; height: number } | null> {
+    const bin = process.env.FFPROBE_PATH || "/usr/bin/ffprobe";
+    return new Promise((resolve) => {
+      const child = spawn(bin, [
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=codec_name,height",
+        "-of", "json",
+        file,
+      ], { stdio: ["ignore", "pipe", "pipe"] });
+      let out = "";
+      const timer = setTimeout(() => { try { child.kill("SIGTERM"); } catch {} resolve(null); }, 15_000);
+      child.stdout.on("data", (chunk) => { out += chunk.toString("utf8"); });
+      child.on("error", () => { clearTimeout(timer); resolve(null); });
+      child.on("close", () => {
+        clearTimeout(timer);
+        try {
+          const stream = JSON.parse(out)?.streams?.[0];
+          resolve(stream ? { codec: String(stream.codec_name || ""), height: Number(stream.height) || 0 } : null);
+        } catch { resolve(null); }
+      });
+    });
+  }
+
+  // 返回转码后的文件路径；不需要转码返回 null
+  async function transcodeIfNeeded(file: string, base: string): Promise<string | null> {
+    const pathMod = await import("node:path");
+    if (type === "audio") {
+      const probe = await probeCodec(file);
+      // 容器里是音频轨，ffprobe 拿不到 v:0，用 -select_streams a:0 再探一次没意义，
+      // 直接用扩展名判断：m4a/mp3 已经是通用格式。
+      const ext = pathMod.extname(file).slice(1).toLowerCase();
+      if (ext === "m4a" || ext === "mp3") return null;
+      const out = `${base}.aac.m4a`;
+      try {
+        await runFfmpeg(["-y", "-hide_banner", "-loglevel", "error", "-i", file,
+          "-vn", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out], 120_000);
+        return out;
+      } catch (err) {
+        console.error("[api/media-stream] audio transcode failed", (err as Error)?.message);
+        return null;
+      }
+    }
+
+    const probe = await probeCodec(file);
+    const codec = probe?.codec || "";
+    // 浏览器通吃的编码：H.264 / VP9 / AV1。HEVC、H.266 一律转码。
+    if (codec === "h264" || codec === "vp9" || codec === "av1" || codec === "vp8") return null;
+    const out = `${base}.h264.mp4`;
+    const args = ["-y", "-hide_banner", "-loglevel", "error", "-i", file, "-c:v", "libx264",
+      "-preset", "veryfast", "-crf", "24", "-pix_fmt", "yuv420p"];
+    if (probe && probe.height > 720) args.push("-vf", "scale=-2:720");
+    args.push("-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out);
+    try {
+      console.log(`[api/media-stream] transcode ${codec || "unknown"} → h264`);
+      await runFfmpeg(args, 170_000);
+      return out;
+    } catch (err) {
+      console.error("[api/media-stream] transcode failed", (err as Error)?.message);
+      return null;
+    }
+  }
+
   // —— 文件缓冲：yt-dlp 自己下载（它带对了 Cookie / 签名），落盘后再按文件提供 Range。
   //    以前这里把 yt-dlp 的 stdout 直接丢给播放器：没有 Content-Length、
   //    Accept-Ranges: none，手机浏览器（尤其 iOS）直接播不了，也不能拖进度。
@@ -645,9 +730,20 @@ async function handle(request: Request): Promise<Response> {
       const prefix = pathMod.basename(base) + ".";
       const produced = (await fsMod.readdir(dir)).filter((f) => f.startsWith(prefix));
       if (!produced.length) throw new Error("download produced no file");
-      const file = pathMod.join(dir, produced[0]);
-      const st = await fsMod.stat(file);
+      let file = pathMod.join(dir, produced[0]);
+      let st = await fsMod.stat(file);
       if (!st.size) throw new Error("empty media file");
+
+      // —— 编码兼容：TikTok 现在默认给 HEVC(H.265)。iOS 能解，安卓 Chrome 和
+      //    不少桌面浏览器直接黑屏，用户看到的就是「加载出来了但播不了」。
+      //    这里用 ffmpeg 现场转成 H.264/AAC（+faststart，边下边播），转完缓存复用。
+      const transcoded = await transcodeIfNeeded(file, base);
+      if (transcoded) {
+        await fsMod.unlink(file).catch(() => {});
+        file = transcoded;
+        st = await fsMod.stat(file);
+      }
+
       const ext = pathMod.extname(file).slice(1).toLowerCase();
       const info = {
         path: file,
