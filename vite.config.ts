@@ -16,13 +16,15 @@ const deployTarget = process.env.DEPLOY_TARGET;
 const useNodePreset = deployTarget !== "cloudflare" && deployTarget !== "lovable";
 
 export default defineConfig({
+  // `plugins` 是 nitro 原生字段，但 @lovable 的配置类型只声明了 preset/output/cloudflare，
+  // 运行时仍会透传给 nitro（产物入口能看到调用），所以这里用 as 绕过类型限制。
   nitro: useNodePreset
-    ? {
+    ? ({
         preset: "node-server",
         // 媒体缓存的定时清理必须跟着服务进程启动（不能等 SSR 请求）。
         // 用绝对路径，避免 nitro 的 srcDir 与项目结构不一致时解析不到。
         plugins: [fileURLToPath(new URL("./src/nitro/cleanup-plugin.ts", import.meta.url))],
-      }
+      } as never)
     : undefined,
   vite: {
     resolve: {

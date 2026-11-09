@@ -98,6 +98,26 @@ function supabaseKey() {
   return process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 }
 
+async function withTimeout<T>(task: Promise<T>, ms: number, label: string): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const guard = new Promise<null>((resolve) => {
+    timer = setTimeout(() => {
+      console.log(`[media-cleanup] timeout(${ms}ms) ${label}`);
+      resolve(null);
+    }, ms);
+    try {
+      (timer as unknown as { unref?: () => void }).unref?.();
+    } catch {
+      /* ignore */
+    }
+  });
+  try {
+    return await Promise.race([task, guard]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function getClient() {
   const url = supabaseUrl();
   const key = supabaseKey();
@@ -107,11 +127,18 @@ async function getClient() {
 }
 
 async function readSetting(key: string): Promise<string> {
-  const sb = await getClient();
-  if (!sb) return "";
+  const started = Date.now();
   try {
-    const { data } = await sb.from("app_settings").select("value").eq("key", key).maybeSingle();
-    const value = (data as { value?: unknown } | null)?.value;
+    const sb = await withTimeout(getClient(), 8000, "getClient");
+    if (!sb) return "";
+    const result = await withTimeout(
+      Promise.resolve(sb.from("app_settings").select("value").eq("key", key).maybeSingle() as never),
+      8000,
+      `read ${key}`,
+    );
+    const data = (result as { data?: { value?: unknown } | null } | null)?.data;
+    const value = data?.value;
+    console.log(`[media-cleanup] read ${key} ${Date.now() - started}ms`);
     return typeof value === "string" ? value : value == null ? "" : String(value);
   } catch (err) {
     console.error("[media-cleanup] read setting failed", key, (err as Error)?.message);
@@ -339,6 +366,7 @@ async function tick() {
     /* ignore */
   }
   const config = await loadCleanupConfig();
+  console.log(`[media-cleanup] config enabled=${config.enabled} interval=${config.intervalMinutes}min`);
   if (!config.enabled) {
     console.log("[media-cleanup] tick skipped: disabled");
     return;
