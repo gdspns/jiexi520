@@ -3179,8 +3179,11 @@
         // 按 hostname 精确匹配：用 /x\.com/ 这种子串正则会把 pipix.com（皮皮虾）
         // 判成 X/Twitter，国内链接被当成海外去预热 media-stream、绕代理，直接播不了。
         const OVERSEAS_DOMAINS = ['youtube.com', 'youtu.be', 'tiktok.com', 'instagram.com', 'facebook.com', 'fb.watch', 'twitter.com', 'x.com', 'vimeo.com'];
+        // 注意：这里不能调播放器 IIFE 里的 hostOf()，作用域不通（会抛
+        // ReferenceError 把整个提交处理器打断）。自带一个 hostname 解析。
         function isOverseasHost(u) {
-            const h = hostOf(String(u || ''));
+            let h = '';
+            try { h = new URL(String(u || '')).hostname.toLowerCase(); } catch (e) { return false; }
             if (!h) return false;
             return OVERSEAS_DOMAINS.some((d) => h === d || h.endsWith('.' + d));
         }
