@@ -351,6 +351,148 @@ type BufferedFile = { path: string; size: number; contentType: string; expires: 
 const bufferedFiles = new Map<string, BufferedFile>();
 const downloadTasks = new Map<string, Promise<BufferedFile>>();
 
+// —— 落盘下载的资源上限。容器内存 768MB、根分区 63G（/tmp 就在 overlay 上，不是 tmpfs，
+//    所以下载不占内存）。真正要防的是两件事：
+//    ① 并发：同时几路 yt-dlp + ffmpeg（libx264 720p 峰值 200~300MB）会把 768MB 撑爆，
+//       进程被 OOMKill 会连累所有正在播放的请求；
+//    ② 磁盘：一条长视频可能就是几个 G，没人清理迟早把根分区写满。
+const MEDIA_CACHE_DIR = process.env.MEDIA_CACHE_DIR || "/tmp/media-cache";
+const CACHE_TTL_MS = 20 * 60_000;
+const CACHE_SWEEP_AGE_MS = 25 * 60_000;
+const MAX_CACHE_BYTES = Number(process.env.MEDIA_CACHE_MAX_MB || 1536) * 1024 * 1024;
+const MAX_CACHE_FILES = Number(process.env.MEDIA_CACHE_MAX_FILES || 60);
+const MAX_VIDEO_BYTES = Number(process.env.MEDIA_MAX_VIDEO_MB || 200) * 1024 * 1024;
+const MAX_AUDIO_BYTES = Number(process.env.MEDIA_MAX_AUDIO_MB || 40) * 1024 * 1024;
+const MAX_CONCURRENT_DOWNLOADS = Number(process.env.MEDIA_MAX_CONCURRENT || 2);
+const MIN_FREE_BYTES = Number(process.env.MEDIA_MIN_FREE_MB || 2048) * 1024 * 1024;
+
+function failWith(status: number, message: string): Error {
+  const err = new Error(message) as Error & { statusCode?: number };
+  err.statusCode = status;
+  return err;
+}
+
+let activeDownloads = 0;
+const downloadWaiters: Array<() => void> = [];
+
+function newDownloadToken(): () => void {
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    activeDownloads = Math.max(0, activeDownloads - 1);
+    const next = downloadWaiters.shift();
+    if (next) next();
+  };
+}
+
+// 拿不到槽位就排队（最多等 20 秒）。手机端播放器会并发发好几个 Range 请求，
+// 排队比直接 503 体验好；但排太久还不如让人重试，所以有超时。
+async function acquireDownloadSlot(timeoutMs = 20_000): Promise<() => void> {
+  if (activeDownloads < MAX_CONCURRENT_DOWNLOADS) {
+    activeDownloads += 1;
+    return newDownloadToken();
+  }
+  return new Promise<() => void>((resolve, reject) => {
+    let settled = false;
+    const grant = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      activeDownloads += 1;
+      resolve(newDownloadToken());
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const i = downloadWaiters.indexOf(grant);
+      if (i >= 0) downloadWaiters.splice(i, 1);
+      reject(failWith(503, "busy"));
+    }, timeoutMs);
+    downloadWaiters.push(grant);
+  });
+}
+
+// 清理缓存目录：先删超过 25 分钟没动过的，再按「总量 / 文件数」预算从最旧的删。
+// 返回当前占用，顺带把 bufferedFiles 里指向已删文件的条目摘掉。
+async function sweepCache(verbose = false): Promise<{ bytes: number; files: number; freedBytes: number }> {
+  const fsMod = await import("node:fs/promises");
+  const pathMod = await import("node:path");
+  const entries: Array<{ path: string; size: number; mtime: number }> = [];
+  try {
+    await fsMod.mkdir(MEDIA_CACHE_DIR, { recursive: true });
+    for (const name of await fsMod.readdir(MEDIA_CACHE_DIR)) {
+      const full = pathMod.join(MEDIA_CACHE_DIR, name);
+      const st = await fsMod.stat(full).catch(() => null);
+      if (!st || !st.isFile()) continue;
+      entries.push({ path: full, size: st.size, mtime: st.mtimeMs });
+    }
+  } catch {
+    return { bytes: 0, files: 0, freedBytes: 0 };
+  }
+
+  const now = Date.now();
+  const keep: typeof entries = [];
+  let freed = 0;
+  let removedCount = 0;
+  for (const e of entries) {
+    if (now - e.mtime > CACHE_SWEEP_AGE_MS) {
+      await fsMod.unlink(e.path).catch(() => {});
+      freed += e.size;
+      removedCount += 1;
+    } else {
+      keep.push(e);
+    }
+  }
+
+  keep.sort((a, b) => a.mtime - b.mtime); // 最旧在前
+  let total = keep.reduce((sum, e) => sum + e.size, 0);
+  while ((total > MAX_CACHE_BYTES || keep.length > MAX_CACHE_FILES) && keep.length) {
+    const victim = keep.shift()!;
+    await fsMod.unlink(victim.path).catch(() => {});
+    total -= victim.size;
+    freed += victim.size;
+    removedCount += 1;
+  }
+
+  if (removedCount) {
+    const alive = new Set(keep.map((e) => e.path));
+    for (const [key, info] of bufferedFiles) {
+      if (!alive.has(info.path)) bufferedFiles.delete(key);
+    }
+  }
+
+  if (verbose || removedCount) {
+    console.log(
+      `[api/media-stream] cache sweep removed=${removedCount} freed=${(freed / 1048576).toFixed(1)}MB ` +
+        `left=${(total / 1048576).toFixed(1)}MB files=${keep.length} active=${activeDownloads}`,
+    );
+  }
+  return { bytes: total, files: keep.length, freedBytes: freed };
+}
+
+// 定时兜底清理：只有「有人下载」时才清的话，最后一个用户看完，文件会一直躺在磁盘里。
+const SWEEP_TIMER_KEY = Symbol.for("jiexi520.mediaCacheSweepTimer");
+const timerHost = globalThis as unknown as Record<symbol, unknown>;
+if (!timerHost[SWEEP_TIMER_KEY]) {
+  const timer = setInterval(() => { void sweepCache(true); }, 10 * 60_000);
+  try { (timer as unknown as { unref?: () => void }).unref?.(); } catch {}
+  timerHost[SWEEP_TIMER_KEY] = timer;
+}
+
+// 下载前确认还有空间：先看可用空间，不够就先清一遍缓存，仍不够就别下（宁可不播，也别写满根分区）。
+async function ensureDiskSpace(): Promise<boolean> {
+  const fsMod = await import("node:fs/promises");
+  const read = async () => {
+    const st = await fsMod.statfs(MEDIA_CACHE_DIR).catch(() => null);
+    if (!st) return Number.POSITIVE_INFINITY;
+    return Number(st.bavail) * Number(st.bsize);
+  };
+  if ((await read()) >= MIN_FREE_BYTES) return true;
+  await sweepCache(true);
+  return (await read()) >= MIN_FREE_BYTES;
+}
+
 async function writeParseLog(row: {
   platform: string;
   type: string;
@@ -675,28 +817,47 @@ async function handle(request: Request): Promise<Response> {
     const running = downloadTasks.get(cacheKey);
     if (running) return running;
 
+    const maxBytes = type === "audio" ? MAX_AUDIO_BYTES : MAX_VIDEO_BYTES;
+    // 下载个 720p 就够了：再高也要转成 720 给浏览器播，先拉 1080/4K 只是多花磁盘和时间。
+    const bufferedFormat =
+      type === "audio"
+        ? format
+        : "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/b[height<=720]/best[ext=mp4]/best";
+
     const task = (async () => {
+      const release = await acquireDownloadSlot();
+      try {
+        return await runBufferedDownload();
+      } finally {
+        release();
+      }
+    })().finally(() => {
+      downloadTasks.delete(cacheKey);
+    });
+
+    async function runBufferedDownload(): Promise<BufferedFile> {
       const fsMod = await import("node:fs/promises");
       const pathMod = await import("node:path");
       const { createHash } = await import("node:crypto");
-      const dir = "/tmp/media-cache";
+      const dir = MEDIA_CACHE_DIR;
       await fsMod.mkdir(dir, { recursive: true });
-      // 顺手清掉 30 分钟前的缓存文件，别把容器写满
-      try {
-        for (const f of await fsMod.readdir(dir)) {
-          const p = pathMod.join(dir, f);
-          const st = await fsMod.stat(p).catch(() => null);
-          if (st && Date.now() - st.mtimeMs > 30 * 60_000) await fsMod.unlink(p).catch(() => {});
-        }
-      } catch {}
+
+      if (!(await ensureDiskSpace())) {
+        throw failWith(503, `disk space low (<${Math.round(MIN_FREE_BYTES / 1048576)}MB free)`);
+      }
+      // 进来先按预算清一遍，避免上一波文件把这一波挤爆
+      await sweepCache();
 
       const base = pathMod.join(dir, createHash("sha1").update(cacheKey).digest("hex").slice(0, 20));
       const dlArgs = [
-        "-f", format,
+        "-f", bufferedFormat,
         "--no-warnings", "--no-check-certificates",
         "--socket-timeout", "30",
         "--retries", "3",
         "--geo-bypass",
+        // yt-dlp 拿到元数据就知道大小，超限直接不下（省带宽也省磁盘）；
+        // 元数据没给大小的，下完再用 stat 兜一层。
+        "--max-filesize", `${Math.max(1, Math.floor(maxBytes / 1048576))}M`,
         "--add-header", `referer:${referer}`,
         "--add-header", `user-agent:${entry!.ua}`,
       ];
@@ -733,6 +894,10 @@ async function handle(request: Request): Promise<Response> {
       let file = pathMod.join(dir, produced[0]);
       let st = await fsMod.stat(file);
       if (!st.size) throw new Error("empty media file");
+      if (st.size > maxBytes) {
+        await fsMod.unlink(file).catch(() => {});
+        throw failWith(413, `media too large (${(st.size / 1048576).toFixed(0)}MB > ${Math.floor(maxBytes / 1048576)}MB)`);
+      }
 
       // —— 编码兼容：TikTok 现在默认给 HEVC(H.265)。iOS 能解，安卓 Chrome 和
       //    不少桌面浏览器直接黑屏，用户看到的就是「加载出来了但播不了」。
@@ -744,21 +909,31 @@ async function handle(request: Request): Promise<Response> {
         st = await fsMod.stat(file);
       }
 
+      if (st.size > maxBytes) {
+        await fsMod.unlink(file).catch(() => {});
+        throw failWith(413, `media too large after transcode (${(st.size / 1048576).toFixed(0)}MB)`);
+      }
+
       const ext = pathMod.extname(file).slice(1).toLowerCase();
-      const info = {
+      const info: BufferedFile = {
         path: file,
         size: st.size,
         contentType: MIME[ext] || (type === "audio" ? "audio/mp4" : "video/mp4"),
-        expires: Date.now() + 20 * 60_000,
+        expires: Date.now() + CACHE_TTL_MS,
       };
+      // 表本身也别无限长：超出就摘最旧的（文件由 sweepCache 负责）
+      if (bufferedFiles.size >= MAX_CACHE_FILES * 2) {
+        const oldest = [...bufferedFiles.entries()].sort((a, b) => a[1].expires - b[1].expires)[0];
+        if (oldest) bufferedFiles.delete(oldest[0]);
+      }
       bufferedFiles.set(cacheKey, info);
       console.log(
-        `[api/media-stream] buffered platform=${platform || "unknown"} type=${type} size=${(st.size / 1048576).toFixed(1)}MB`,
+        `[api/media-stream] buffered platform=${platform || "unknown"} type=${type} size=${(st.size / 1048576).toFixed(1)}MB active=${activeDownloads}`,
       );
+      // 下完再清一次，把这一轮之前的旧文件按预算收掉
+      void sweepCache();
       return info;
-    })().finally(() => {
-      downloadTasks.delete(cacheKey);
-    });
+    }
 
     downloadTasks.set(cacheKey, task);
     return task;
@@ -817,8 +992,14 @@ async function handle(request: Request): Promise<Response> {
         const info = await downloadBuffered();
         return await serveBuffered(info, request.headers.get("range"));
       } catch (err) {
-        console.error("[api/media-stream] buffered download failed", redactSensitive((err as Error)?.message, proxy));
-        return new Response("stream unavailable", { status: 502, headers: CORS });
+        const status = (err as { statusCode?: number })?.statusCode || 502;
+        console.error(
+          `[api/media-stream] buffered download failed status=${status}`,
+          redactSensitive((err as Error)?.message, proxy),
+        );
+        const headers = new Headers(CORS);
+        if (status === 503) headers.set("Retry-After", "15");
+        return new Response(status === 503 ? "server busy, retry later" : "stream unavailable", { status, headers });
       }
     }
 
@@ -884,7 +1065,19 @@ async function handle(request: Request): Promise<Response> {
       const info = await downloadBuffered();
       return await serveBuffered(info, request.headers.get("range"));
     } catch (err) {
-      console.error("[api/media-stream] buffered download failed", redactSensitive((err as Error)?.message, proxy));
+      const status = (err as { statusCode?: number })?.statusCode || 502;
+      console.error(
+        `[api/media-stream] buffered download failed status=${status}`,
+        redactSensitive((err as Error)?.message, proxy),
+      );
+      if (status === 503 || status === 413) {
+        const headers = new Headers(CORS);
+        if (status === 503) headers.set("Retry-After", "15");
+        return new Response(
+          status === 503 ? "server busy, retry later" : "media too large",
+          { status, headers },
+        );
+      }
     }
   }
 
