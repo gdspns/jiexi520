@@ -333,8 +333,16 @@ export async function runCleanup(trigger: string): Promise<CleanupRun> {
 const TICK_MS = 30_000;
 
 async function tick() {
+  try {
+    console.log("[media-cleanup] tick");
+  } catch {
+    /* ignore */
+  }
   const config = await loadCleanupConfig();
-  if (!config.enabled) return;
+  if (!config.enabled) {
+    console.log("[media-cleanup] tick skipped: disabled");
+    return;
+  }
   await loadPersistedRun();
   const lastAt = lastRun.at ? Date.parse(lastRun.at) : 0;
   const due = Date.now() - lastAt >= config.intervalMinutes * 60_000;
@@ -356,15 +364,8 @@ export function startCleanupScheduler(): void {
     /* 不支持的运行时忽略 */
   }
   host[SWEEP_TIMER_KEY] = { timer, startedAt: Date.now() };
-  // 启动 90 秒后先探一次：部署完成后不用等满一个周期才有第一次清理
-  const kick = setTimeout(() => {
-    void tick().catch(() => {});
-  }, 90_000);
-  try {
-    (kick as unknown as { unref?: () => void }).unref?.();
-  } catch {
-    /* ignore */
-  }
+  // 部署完成立刻清一次（users 不用等满一个周期），失败也不影响服务
+  void tick().catch((err) => console.error("[media-cleanup] boot tick failed", (err as Error)?.message));
   console.log(`[media-cleanup] scheduler started tick=${TICK_MS / 1000}s dir=${MEDIA_CACHE_DIR}`);
 }
 
