@@ -1185,7 +1185,15 @@
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) {
-                throw new Error(data?.error || ('HTTP ' + response.status));
+                const msg = data?.error || ('HTTP ' + response.status);
+                // 服务端才是次数的最终判定者：真不足时统一提示并引导充值
+                if (response.status === 402 || /次数不足/.test(msg)) {
+                    const err = new Error(msg || '次数不足');
+                    err.code = 'NO_CREDITS';
+                    if (window.__notifyInsufficientCredits) window.__notifyInsufficientCredits(msg);
+                    throw err;
+                }
+                throw new Error(msg);
             }
             if (typeof data.credits_remaining === 'number') {
                 try { window.dispatchEvent(new CustomEvent('credits:updated', { detail: data.credits_remaining })); } catch {}
@@ -2046,9 +2054,15 @@
         // iOS Safari 给单个标签页的内存上限只有几百 MB，把 30MB 以上的视频
         // 拼成 Blob 再 new File 分享，系统会直接杀掉页面 —— 这就是「保存读到
         // 一半就停、然后失败」。所以：
-        //   小文件（≤16MB）→ 读取后走系统分享，可一键存相册；
-        //   大文件 → 一律交给系统下载管理器 / 原生播放器流式处理，零内存占用。
-        const MOBILE_SHARE_LIMIT = 16 * 1024 * 1024;
+        //   小文件 → 读取后走系统分享，可一键存相册（"存储视频"就是这个菜单出来的）；
+        //   大文件 → 交给系统下载管理器 / 原生播放器流式处理，零内存占用。
+        //
+        // 注意：iOS/安卓的系统分享必须在「用户点击的那一下」里调用，一旦中间
+        // await 了十几秒下载，手势就失效了，navigator.share 会抛 NotAllowedError，
+        // 用户看到的就是「点了没反应 / 分享被拦住」。所以小视频会提前预读，
+        // 用户点到「存入相册」时几乎是瞬间调起系统菜单。
+        const MOBILE_SHARE_LIMIT = 80 * 1024 * 1024;
+        const MOBILE_PREFETCH_LIMIT = 12 * 1024 * 1024;
 
         function formatSize(bytes) {
             if (!bytes || !isFinite(bytes)) return '';
@@ -2213,9 +2227,11 @@
             sizeEl.textContent = totalBytes ? '视频大小 ' + formatSize(totalBytes) : '';
 
             const fileShare = supportsFileShare();
-            // 量不到大小也先给「存入相册」：真正读取时 fetchMediaBlob 会按
-            // MOBILE_SHARE_LIMIT 卡住，超了自动抛 TOO_LARGE 切到不占内存的方案。
-            const shareMode = fileShare && !env.isWeChat && (totalBytes === 0 || totalBytes <= MOBILE_SHARE_LIMIT);
+            // 只要系统支持「把文件交给分享」，就永远给「存入相册」这个主按钮。
+            // 之前用 16MB 卡了一刀，稍大一点的视频直接把「存储视频」入口藏起来，
+            // 用户就觉得「点下载视频调不起存储视频了」。超限只在真正读取时按
+            // MOBILE_SHARE_LIMIT 兜底，自动切到不占内存的方案。
+            const shareMode = fileShare && !env.isWeChat;
             const primaryCls = 'w-full rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 py-3 font-bold text-white block';
             const secondaryCls = 'w-full rounded-xl bg-slate-800 py-3 font-bold text-slate-100 block';
 
@@ -2231,19 +2247,19 @@
                 if (shareMode) {
                     shareBtn.style.display = 'block';
                     shareBtn.textContent = '存入相册（推荐）';
-                    tipEl.textContent = '点「存入相册」，在系统菜单里选「存储视频」。';
+                    tipEl.textContent = totalBytes > MOBILE_SHARE_LIMIT
+                        ? `视频较大（${formatSize(totalBytes)}），点「存入相册」需要等一会儿；等不及可先「在浏览器打开视频」再长按保存。`
+                        : '点「存入相册」，在系统菜单里选「存储视频」。';
                     // iOS 上「下载」只会落到“文件”App，不是相册，所以是次要选项
                     directLink.className = 'save-direct ' + secondaryCls;
                     directLink.innerHTML = '下载到「文件」（.mp4）';
-                    hintEl.textContent = '系统菜单里没有「存储视频」？先点「在浏览器打开视频」，再长按画面 → 存储到照片。';
+                    hintEl.textContent = '系统菜单里没有「存储视频」？点「在浏览器打开视频」，长按画面 → 存储照片。';
                 } else {
                     // 小于 iOS 16.4 或大文件：分享不可用，最稳的是原生播放器长按保存
                     shareBtn.style.display = 'none';
                     playLink.className = 'save-play ' + primaryCls;
                     playLink.textContent = '打开视频后长按保存';
-                    tipEl.textContent = totalBytes > MOBILE_SHARE_LIMIT
-                        ? '视频较大，建议用系统播放器打开后长按保存（不占内存，最稳）。'
-                        : '点「打开视频后长按保存」，长按画面 → 存储到照片。';
+                    tipEl.textContent = '点「打开视频后长按保存」，长按画面 → 存储照片。';
                     directLink.className = 'save-direct ' + secondaryCls;
                     hintEl.textContent = '若长按没有反应，点「下载到文件」把 .mp4 存到「文件」App，再到相册导入。';
                 }
@@ -2268,6 +2284,44 @@
                     tipEl.textContent = '点「下载 MP4 视频」即可，进度在通知栏或下载列表里。';
                     hintEl.textContent = '下载完成后，相册通常会自动出现；没有的话到「文件 / Downloads」里找这个 mp4。';
                 }
+            }
+
+            // ---- 提前把视频读进内存（仅小文件）----
+            // 系统分享必须在用户点击的「同一个手势」里调起，中间一旦 await 十几秒
+            // 下载，手势就失效，navigator.share 直接抛 NotAllowedError —— 用户的感受
+            // 就是「点了下载视频却调不起『存储视频』」。所以小视频在弹窗打开时就
+            // 悄悄预读，点按钮时几乎是瞬间唤出系统菜单。
+            let prefetchedBlob = null;
+            let prefetchPromise = null;
+            const progressCb = (percent, received) => {
+                if (percent === null) {
+                    statusEl.textContent = `已读取 ${(received / 1048576).toFixed(1)} MB`;
+                } else {
+                    progressBar.style.width = `${Math.min(100, percent)}%`;
+                    statusEl.textContent = `正在读取视频 ${Math.round(percent)}%`;
+                }
+            };
+            const startPrefetch = () => {
+                if (prefetchPromise) return prefetchPromise;
+                if (!activeController) activeController = new AbortController();
+                prefetchPromise = fetchMediaBlob(url, progressCb, activeController.signal, {
+                    refresh: refreshVideoUrl,
+                    maxBytes: MOBILE_SHARE_LIMIT,
+                }).then((blob) => {
+                    prefetchedBlob = blob;
+                    return blob;
+                });
+                prefetchPromise.catch(() => {});
+                return prefetchPromise;
+            };
+            const getBlob = () => (prefetchedBlob ? Promise.resolve(prefetchedBlob) : startPrefetch());
+
+            if (shareMode && totalBytes > 0 && totalBytes <= MOBILE_PREFETCH_LIMIT) {
+                progressWrap.classList.remove('hidden');
+                statusEl.textContent = '正在准备视频…';
+                startPrefetch()
+                    .then(() => { if (overlay.isConnected) { progressWrap.classList.add('hidden'); shareBtn.textContent = env.isIOS ? '存入相册（推荐）' : '分享 / 存到相册'; } })
+                    .catch(() => { if (overlay.isConnected) progressWrap.classList.add('hidden'); });
             }
 
             // 弹窗停留过久，原直链多半已过期：点下载前先换一条新链，
@@ -2305,18 +2359,11 @@
                     if (shareBtn.dataset.busy === '1') return;
                     shareBtn.dataset.busy = '1';
                     shareBtn.disabled = true;
-                    activeController = new AbortController();
                     progressWrap.classList.remove('hidden');
-                    statusEl.textContent = '正在读取视频…';
+                    if (!prefetchedBlob) statusEl.textContent = '正在读取视频…';
                     try {
-                        const blob = await fetchMediaBlob(url, (percent, received) => {
-                            if (percent === null) {
-                                statusEl.textContent = `已读取 ${(received / 1048576).toFixed(1)} MB`;
-                            } else {
-                                progressBar.style.width = `${Math.min(100, percent)}%`;
-                                statusEl.textContent = `正在读取视频 ${Math.round(percent)}%`;
-                            }
-                        }, activeController.signal, { refresh: refreshVideoUrl, maxBytes: MOBILE_SHARE_LIMIT });
+                        // 预读完成时这里几乎立刻返回，系统菜单能在手势内弹出
+                        const blob = await getBlob();
                         const file = new File([blob], finalName, { type: 'video/mp4' });
                         if (navigator.canShare && navigator.canShare({ files: [file] })) {
                             await navigator.share({ files: [file], title: finalName });
@@ -2329,14 +2376,19 @@
                         if (error?.name === 'AbortError') { statusEl.textContent = '已取消'; return; }
                         progressWrap.classList.add('hidden');
                         if (error?.code === 'TOO_LARGE') {
-                            tipEl.textContent = '视频较大，已切换到不占内存的方式：请用「下载 MP4 视频」或「在浏览器打开视频」。';
+                            tipEl.textContent = `视频较大（${formatSize(totalBytes)}），已切换到不占内存的方式：请用「下载 MP4 视频」或「在浏览器打开视频」再保存。`;
                             shareBtn.style.display = 'none';
                             if (env.isIOS) playLink.className = 'save-play ' + primaryCls;
+                        } else if (error?.name === 'NotAllowedError' || /not allowed|denied|拦截/.test(String(error?.message || ''))) {
+                            // 典型「手势过期」：读取时间太长，系统不允许再弹分享
+                            tipEl.textContent = '系统没让弹出保存菜单：请点「在浏览器打开视频」，长按画面 → 存储照片；或直接「下载到文件」。';
+                            if (env.isIOS) playLink.className = 'save-play ' + primaryCls;
+                            shareBtn.style.display = 'none';
                         } else {
                             tipEl.textContent = '分享被浏览器拦住了，改用「下载 MP4 视频」或「在浏览器打开视频」再保存。';
                         }
                         revealDesktop();
-                        showToast(error?.message || '保存失败，可改用电脑网页端保存', 'error');
+                        showToast(error?.code === 'TOO_LARGE' ? '视频较大，请改用下载或长按保存' : (error?.message || '保存失败，可改用电脑网页端保存'), 'error');
                     } finally {
                         shareBtn.dataset.busy = '0';
                         shareBtn.disabled = false;
@@ -2345,6 +2397,8 @@
             }
 
             directLink.addEventListener('click', () => {
+                // 走系统下载器就不需要预读了，别让后台预读抢带宽
+                if (activeController && !prefetchedBlob) { try { activeController.abort(); } catch (e) {} }
                 showToast(env.isIOS ? '已开始下载，请到「文件」App 查看' : '已开始下载，请在通知栏或下载列表查看进度', 'success');
             });
         }
@@ -2524,6 +2578,14 @@
 
         // 通用下载包装器（包含进度条显示）
         async function downloadMedia(url, fileName, isAudio, btnEl = null) {
+            // 手机上（包括开了「请求桌面网站」、宽度够宽走桌面布局的情况）不要
+            // 先把整个视频读进内存再存：直接弹保存面板，让用户可以一键调起系统
+            // 的「存储视频 / 存入相册」，或者交给系统下载管理器流式落盘。
+            const mobileUA = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+            if (mobileUA && !isAudio) {
+                promptMobileVideoSave(url, fileName);
+                return;
+            }
             const originalHTML = btnEl ? btnEl.innerHTML : null;
             const originalDisabled = btnEl ? btnEl.disabled : false;
 
@@ -2764,7 +2826,8 @@
                 rememberLastResult(currentShareUrl, currentSingleData);
                 renderSingleResult(currentSingleData);
             } catch (err) {
-                if (seq === singleSubmitSeq) showToast(err.message, 'error');
+                // 次数不足已经在 fetchVideoDataAPI 里统一提示过了，别重复弹
+                if (seq === singleSubmitSeq && err?.code !== 'NO_CREDITS') showToast(err.message, 'error');
             } finally {
                 if (seq === singleSubmitSeq) {
                     document.getElementById('submit-btn').disabled = false;
@@ -3036,6 +3099,26 @@
             }
             
             showToast(`准备批量${isAudio ? '转码并下载 MP3' : '下载视频'}... ⚠️请务必允许浏览器弹出多个下载窗口！`, 'info');
+
+            // 手机端批量下载视频：不要把 N 个视频读进内存（会被系统杀页面），
+            // 直接逐个交给系统下载器，进度在通知栏 / 下载列表里。
+            const batchMobileUA = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+            if (batchMobileUA && !isAudio) {
+                showToast(`正在发起 ${validItems.length} 个视频下载，请到通知栏或浏览器下载列表查看`, 'info');
+                validItems.forEach((item, i) => {
+                    setTimeout(() => {
+                        const name = ensureMp4Name(`${String(item.title || 'video').replace(/[\\/'"\n\r]/g, '').substring(0, 30)}_${i + 1}.mp4`);
+                        const a = document.createElement('a');
+                        a.href = toDownloadUrl(item[type], name);
+                        a.setAttribute('download', name);
+                        a.rel = 'noopener';
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                    }, i * 800);
+                });
+                return;
+            }
             
             let count = 0;
             let failCount = 0;
@@ -3247,10 +3330,14 @@
       let isAdmin = false;
       let userCredits = null; // null = 未知/未登录
       const CREDITS_CACHE_KEY = 'yyws_credits_cache_v1';
+      let creditsCache = null;
       try {
         const cached = JSON.parse(localStorage.getItem(CREDITS_CACHE_KEY) || 'null');
         if (cached && typeof cached.credits === 'number') {
-          userCredits = cached.credits;
+          creditsCache = cached;
+          // 缓存里的 0 不可信（可能是另一个账号/欠网时写进去的），一律当作
+          // 「未知」，等真实余额回来再显示。真正的 0 次由服务端拦，不会白解析。
+          userCredits = cached.credits > 0 ? cached.credits : null;
           isAdmin = !!cached.isAdmin;
           window.__userCredits = userCredits;
           window.__isAdmin = isAdmin;
@@ -3693,6 +3780,7 @@
           if (!currentUser) {
             isAdmin = false;
             userCredits = null;
+            creditsCache = null;
             window.__isAdmin = false;
             window.__userCredits = null;
             try { localStorage.removeItem(CREDITS_CACHE_KEY); } catch {}
@@ -3706,11 +3794,20 @@
             sb.from("user_roles").select("role").eq("user_id", currentUser.id),
             sb.from("profiles").select("credits").eq("id", currentUser.id).maybeSingle(),
           ]);
-          isAdmin = !!rolesRes.data?.some(r => r.role === "admin");
-          userCredits = profRes.data?.credits ?? 0;
+          // 关键：查询失败（手机弱网、切后台回来、RLS 偶发超时）时绝不能把次数写成 0。
+          // 之前这里写死 `?? 0`，一次失败就会显示「剩余 0 次」并拦住解析，
+          // 用户明明有次数却提示「次数不足」。读失败就保留上一次的已知值。
+          if (!rolesRes.error && Array.isArray(rolesRes.data)) {
+            isAdmin = rolesRes.data.some(r => r.role === "admin");
+          }
+          const fetchedCredits = profRes.error ? null : Number(profRes.data?.credits);
+          if (Number.isFinite(fetchedCredits)) userCredits = fetchedCredits;
           window.__isAdmin = isAdmin;
           window.__userCredits = userCredits;
-          try { localStorage.setItem(CREDITS_CACHE_KEY, JSON.stringify({ credits: userCredits, isAdmin, uid: currentUser.id })); } catch {}
+          try {
+            creditsCache = { credits: userCredits, isAdmin, uid: currentUser.id };
+            localStorage.setItem(CREDITS_CACHE_KEY, JSON.stringify(creditsCache));
+          } catch {}
           renderBar();
         })().finally(() => { _refreshInflight = null; });
         return _refreshInflight;
@@ -3721,6 +3818,16 @@
       }
       sb.auth.getSession().then(({ data }) => {
         currentUser = data.session?.user || null;
+        // 缓存可能来自这台设备上另一个账号（比如先登录过小号、0 次），
+        // 一旦账号对不上就立刻作废，否则会拿别人的 0 次把人挡在解析门外。
+        if (creditsCache && creditsCache.uid && currentUser && creditsCache.uid !== currentUser.id) {
+          userCredits = null;
+          isAdmin = false;
+          window.__userCredits = null;
+          window.__isAdmin = false;
+          creditsCache = null;
+          try { localStorage.removeItem(CREDITS_CACHE_KEY); } catch (e) {}
+        }
         renderBar();
         // 从电脑/别的设备带链接进来时先回填
         try { prefillFromQuery(); } catch (e) {}
@@ -3768,10 +3875,26 @@
       function requireCredits(actionLabel) {
         if (!requireLogin(actionLabel)) return false;
         if (isAdmin) return true;
-        if (userCredits !== null && userCredits > 0) return true;
+        if (userCredits === null || !Number.isFinite(Number(userCredits))) {
+          // 余额还没拿到（刚打开页面、手机弱网、后台切回来）：不要拦。
+          // 真正的判定交给服务端 consume_credit —— 有次数就正常解析，
+          // 真没次数服务端会返回「次数不足」。这样才不会出现
+          // 「明明有次数却提示次数不足」的误报。
+          refreshAuth();
+          return true;
+        }
+        if (userCredits > 0) return true;
         showToast && showToast(`⚠️ 次数不足，请充值后再使用「${actionLabel}」`, 'error');
+        refreshAuth();
         return false;
       }
+      // 服务端判定次数不足时统一提示 + 刷新余额，避免顶部数字是旧值
+      function notifyInsufficientCredits(message) {
+        refreshAuth();
+        showToast && showToast(`⚠️ ${message || "次数不足"}，请充值后再试`, 'error');
+        try { window.__openRecharge && window.__openRecharge(); } catch (e) {}
+      }
+      window.__notifyInsufficientCredits = notifyInsufficientCredits;
       async function consumeOneCredit() {
         if (isAdmin) return;
         try {
