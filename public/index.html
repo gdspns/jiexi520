@@ -691,23 +691,46 @@
                 try { sessionStorage.setItem('bt-dismissed', '1'); } catch (e) { }
             }
 
+            // 微信 / QQ 的 WebView 里 navigator.clipboard 经常「既不 resolve 也不 reject」，
+            // 用户点了没有任何反应。所以先用同步的 execCommand（这类内核最可靠），
+            // 不行再走异步剪贴板，最后给出「点右上角复制链接」的兜底指引。
+            function legacyCopy(text) {
+                var ta = document.createElement('textarea');
+                ta.value = text;
+                ta.setAttribute('readonly', 'readonly');
+                // iOS 需要元素真实可见才能选中，放到视口内再用 1px 透明盖住
+                ta.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;border:0;padding:0;';
+                document.body.appendChild(ta);
+                var ok = false;
+                try {
+                    ta.focus();
+                    ta.select();
+                    ta.setSelectionRange(0, text.length);
+                    ok = document.execCommand('copy');
+                } catch (e) { ok = false; }
+                document.body.removeChild(ta);
+                return ok;
+            }
+
             function copyUrl() {
                 var url = location.href;
-                var ok = function () { showToast('链接已复制，粘贴到浏览器地址栏即可'); };
-                var fallback = function () {
-                    var ta = document.createElement('textarea');
-                    ta.value = url;
-                    ta.setAttribute('readonly', 'readonly');
-                    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
-                    document.body.appendChild(ta);
-                    ta.select();
-                    ta.setSelectionRange(0, url.length);
-                    try { document.execCommand('copy'); ok(); } catch (e) { showToast('请长按地址栏手动复制'); }
-                    document.body.removeChild(ta);
-                };
+                var ok = function () { showToast('链接已复制，粘贴到浏览器打开即可'); };
+                var manual = function () { showToast('请点右上角 ··· 选择「复制链接」'); };
+                if (legacyCopy(url)) { ok(); return; }
                 if (navigator.clipboard && navigator.clipboard.writeText) {
-                    navigator.clipboard.writeText(url).then(ok).catch(fallback);
-                } else { fallback(); }
+                    // 兜底超时：WebView 里这个 Promise 可能永远不落地
+                    var done = false;
+                    var timer = setTimeout(function () { if (!done) { done = true; manual(); } }, 1200);
+                    navigator.clipboard.writeText(url).then(function () {
+                        if (done) return;
+                        done = true; clearTimeout(timer); ok();
+                    }).catch(function () {
+                        if (done) return;
+                        done = true; clearTimeout(timer); manual();
+                    });
+                    return;
+                }
+                manual();
             }
 
             document.getElementById('bt-copy').addEventListener('click', copyUrl);
