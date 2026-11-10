@@ -586,6 +586,137 @@
 </head>
 <body class="antialiased font-sans flex flex-col items-center p-4 sm:p-8">
 
+    <!-- ===== 微信 / QQ / 微博 等 App 内置浏览器：引导用系统浏览器打开 =====
+         这些 WebView 会拦掉 <video> 全屏、保存到相册、文件下载（微信最严），
+         用户看到的就是「解析成功但播不了 / 存不下来」。检测到这类 UA 时全屏引导，
+         正常浏览器与 PWA 完全不受影响；点「仍然预览」后本次会话不再打扰。 -->
+    <style>
+        #bt-mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 2147483000; display: none; padding: 24px 20px calc(24px + env(safe-area-inset-bottom)); background: rgba(2, 6, 23, .965); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); overscroll-behavior: contain; }
+        #bt-mask.bt-on { display: flex; align-items: center; justify-content: center; }
+        #bt-tip { position: fixed; top: calc(8px + env(safe-area-inset-top)); right: 12px; display: flex; flex-direction: column; align-items: center; gap: 0; pointer-events: none; animation: bt-bob 1.6s ease-in-out infinite; }
+        #bt-tip span { font-size: 11px; color: #fbcfe8; letter-spacing: 1px; margin-top: -4px; }
+        @keyframes bt-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
+        #bt-card { width: 100%; max-width: 340px; background: linear-gradient(160deg, #1e293b, #0f172a); border: 1px solid rgba(148, 163, 184, .28); border-radius: 20px; padding: 22px 20px 16px; box-shadow: 0 24px 60px rgba(0, 0, 0, .65); color: #e2e8f0; font-size: 14px; line-height: 1.65; text-align: left; }
+        #bt-card h3 { margin: 0 0 7px; font-size: 18px; font-weight: 600; color: #fff; letter-spacing: .3px; }
+        #bt-card .bt-sub { margin: 0 0 14px; color: #94a3b8; font-size: 13px; }
+        #bt-steps { margin: 0 0 16px; padding: 12px 14px; list-style: none; background: rgba(15, 23, 42, .8); border: 1px solid rgba(148, 163, 184, .18); border-radius: 12px; font-size: 13.5px; color: #cbd5e1; }
+        #bt-steps li { display: flex; gap: 7px; }
+        #bt-steps li + li { margin-top: 6px; }
+        #bt-steps b { color: #fff; }
+        .bt-btn { display: block; width: 100%; border: 0; border-radius: 12px; padding: 13px 16px; font-size: 15px; font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent; font-family: inherit; }
+        #bt-copy { background: linear-gradient(135deg, #db2777, #7c3aed); color: #fff; box-shadow: 0 8px 22px rgba(219, 39, 119, .35); }
+        #bt-copy:active { transform: translateY(1px); }
+        #bt-keep { margin-top: 8px; background: transparent; color: #94a3b8; font-weight: 500; font-size: 13px; padding: 9px; }
+        #bt-toast { position: fixed; left: 50%; bottom: 14%; transform: translateX(-50%); background: rgba(15, 23, 42, .97); border: 1px solid rgba(148, 163, 184, .3); color: #fff; font-size: 13px; padding: 10px 16px; border-radius: 999px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 2147483001; max-width: 80vw; text-align: center; }
+        #bt-toast.bt-show { opacity: 1; }
+    </style>
+    <div id="bt-mask" role="dialog" aria-modal="true" aria-labelledby="bt-title">
+        <div id="bt-tip" aria-hidden="true">
+            <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+                <path d="M13 43 L41 15" stroke="#fbcfe8" stroke-width="3.4" stroke-linecap="round"/>
+                <path d="M23 14 H42 V33" stroke="#fbcfe8" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>点这里</span>
+        </div>
+        <div id="bt-card">
+            <h3 id="bt-title">请在浏览器中打开</h3>
+            <p class="bt-sub" id="bt-sub">当前在 App 内置浏览器中，视频播放、保存到相册与下载会被限制。</p>
+            <ul id="bt-steps">
+                <li><span>1.</span><span>点击右上角 <b>···</b> 菜单</span></li>
+                <li><span>2.</span><span id="bt-step2">选择「在浏览器打开」</span></li>
+            </ul>
+            <button id="bt-copy" class="bt-btn" type="button">复制网址，粘贴到浏览器打开</button>
+            <button id="bt-keep" class="bt-btn" type="button">仍然在这里预览</button>
+        </div>
+    </div>
+    <div id="bt-toast"></div>
+    <script>
+        (function () {
+            var ua = navigator.userAgent || '';
+            // 这些 App 的 WebView 会限制播放/保存/下载；UC、QQ浏览器、夸克等真浏览器不在列表里
+            var APPS = [
+                [/MicroMessenger/i, '微信'],
+                [/(^|\s)QQ\/\d|_SQ_/i, 'QQ'],
+                [/Qzone/i, 'QQ空间'],
+                [/Weibo/i, '微博'],
+                [/aweme|BytedanceWebview|musical_ly|TikTok/i, '抖音'],
+                [/xhsdiscover|XHSAPP/i, '小红书'],
+                [/Kwai|Kuaishou/i, '快手'],
+                [/DingTalk/i, '钉钉'],
+                [/Lark|Feishu/i, '飞书'],
+                [/AlipayClient/i, '支付宝'],
+                [/baiduboxapp/i, '百度'],
+                [/Instagram/i, 'Instagram'],
+                [/FBAN|FBAV/i, 'Facebook'],
+                [/Twitter/i, 'X']
+            ];
+            var app = '';
+            for (var i = 0; i < APPS.length; i++) {
+                if (APPS[i][0].test(ua)) { app = APPS[i][1]; break; }
+            }
+            if (!app) return;
+            try { if (sessionStorage.getItem('bt-dismissed') === '1') return; } catch (e) { }
+
+            var mask = document.getElementById('bt-mask');
+            var toast = document.getElementById('bt-toast');
+            var isIOS = /iPhone|iPad|iPod/i.test(ua);
+            var isPc = /WindowsWechat|MacWechat/i.test(ua) || !/Mobile|Android|iPhone|iPad/i.test(ua);
+            var step2;
+            if (isPc) step2 = '选择「在默认浏览器中打开」';
+            else if (app === '微信' && isIOS) step2 = '选择「在默认浏览器打开」';
+            else if (app === '微信') step2 = '选择「在浏览器打开」';
+            else if (app === 'QQ' || app === 'QQ空间') step2 = '选择「在浏览器打开」';
+            else step2 = '找「在浏览器打开」或「复制链接」';
+
+            document.getElementById('bt-sub').textContent =
+                '当前在「' + app + '」内置浏览器中，视频播放、保存到相册和下载会被限制，换成手机浏览器一切正常。';
+            document.getElementById('bt-step2').textContent = step2;
+            document.getElementById('bt-keep').textContent = '仍然在「' + app + '」中预览';
+
+            function showToast(msg) {
+                toast.textContent = msg;
+                toast.classList.add('bt-show');
+                clearTimeout(showToast._t);
+                showToast._t = setTimeout(function () { toast.classList.remove('bt-show'); }, 2600);
+            }
+
+            function lockScroll(on) {
+                document.documentElement.style.overflow = on ? 'hidden' : '';
+                document.body.style.overflow = on ? 'hidden' : '';
+            }
+
+            function dismiss() {
+                mask.classList.remove('bt-on');
+                lockScroll(false);
+                try { sessionStorage.setItem('bt-dismissed', '1'); } catch (e) { }
+            }
+
+            function copyUrl() {
+                var url = location.href;
+                var ok = function () { showToast('链接已复制，粘贴到浏览器地址栏即可'); };
+                var fallback = function () {
+                    var ta = document.createElement('textarea');
+                    ta.value = url;
+                    ta.setAttribute('readonly', 'readonly');
+                    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    ta.setSelectionRange(0, url.length);
+                    try { document.execCommand('copy'); ok(); } catch (e) { showToast('请长按地址栏手动复制'); }
+                    document.body.removeChild(ta);
+                };
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(url).then(ok).catch(fallback);
+                } else { fallback(); }
+            }
+
+            document.getElementById('bt-copy').addEventListener('click', copyUrl);
+            document.getElementById('bt-keep').addEventListener('click', dismiss);
+            mask.classList.add('bt-on');
+            lockScroll(true);
+        })();
+    </script>
+
     <main class="w-full max-w-4xl mt-8 sm:mt-12 relative">
         
         <!-- Ambient Background Lights -->
