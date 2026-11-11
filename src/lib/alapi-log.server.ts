@@ -13,6 +13,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 const TOKEN_KEY = "alapi_access_token";
 const LOG_URL = "https://v3.alapi.cn/frontend/dashboard/api/log";
 const APIS_URL = "https://v3.alapi.cn/frontend/dashboard/api/user_apis";
+/** 单条日志详情：带 request_payload（里面就有用户解析的原始链接） */
+const DETAIL_URL = "https://v3.alapi.cn/frontend/dashboard/api/log/detail/";
+/** 我的接口：每个接口今日已用 / 剩余 / 上限 */
+const QUOTA_URL = "https://v3.alapi.cn/frontend/dashboard/api/index?type=0&page=1&search=";
+/** 账号资料：会员档位与到期时间 */
+const PROFILE_URL = "https://v3.alapi.cn/frontend/user/profile";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -33,6 +39,40 @@ export type AlapiCall = {
   duration: number;
   at: string;
   source: AlapiSource;
+  /** 用户解析的原始链接（来自日志详情，可能需要单独拉一次） */
+  url: string;
+};
+
+export type AlapiCallDetail = {
+  logId: string;
+  /** request_payload 里的 url 字段，即用户提交解析的链接 */
+  url: string;
+  /** request_payload 里的 token（alapi 自己脱敏过） */
+  tokenMasked: string;
+  /** 格式化后的请求参数，用于弹窗展示 */
+  payload: string;
+};
+
+export type AlapiQuotaApi = {
+  id: number;
+  name: string;
+  /** 今日已用（含失败） */
+  used: number;
+  success: number;
+  fail: number;
+  /** 今日剩余可用次数 */
+  remain: number;
+  /** 每日上限 */
+  limit: number;
+};
+
+export type AlapiQuota = {
+  ok: boolean;
+  error?: string;
+  apis: AlapiQuotaApi[];
+  planName: string;
+  planEndAt: string;
+  fetchedAt: string;
 };
 
 export type AlapiTokenMeta = {
@@ -96,6 +136,7 @@ export async function saveAlapiToken(token: string): Promise<void> {
     .upsert({ key: TOKEN_KEY, value: token as any, updated_at: new Date().toISOString() });
   if (error) throw new Error(error.message);
   cache.clear();
+  quotaCache = null;
 }
 
 export async function clearAlapiToken(): Promise<void> {
@@ -103,6 +144,7 @@ export async function clearAlapiToken(): Promise<void> {
   if (!sb) return;
   await sb.from("app_settings").delete().eq("key", TOKEN_KEY);
   cache.clear();
+  quotaCache = null;
 }
 
 // 一键同步用的密钥：浏览器书签带着它把最新 token POST 回来。
@@ -199,6 +241,155 @@ async function apiNames(token: string): Promise<Map<number, string>> {
   }
   if (map.size) apiNamesCache = { at: Date.now(), map };
   return map;
+}
+
+// ============ 日志详情（解析链接） ============
+// 列表接口不带请求参数，链接要单独查 /api/log/detail/<log_id>。
+// 详情是只读的历史数据，一个 log_id 永远不会变，所以缓存可以无限期，只做容量上限。
+const detailCache = new Map<string, AlapiCallDetail>();
+const DETAIL_CACHE_MAX = 4000;
+
+/** 简单的并发闸门：ALAPI 账户 QPS 只有个位数，别一次打太多 */
+async function runPool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (cursor < items.length) {
+      const item = items[cursor++];
+      await fn(item).catch(() => undefined);
+    }
+  });
+  await Promise.all(workers);
+}
+
+type PayloadObj = { url?: unknown; token?: unknown };
+
+function parsePayload(raw: unknown): PayloadObj | null {
+  if (!raw) return null;
+  if (typeof raw === "object") return raw as PayloadObj;
+  try {
+    const parsed = JSON.parse(String(raw));
+    return parsed && typeof parsed === "object" ? (parsed as PayloadObj) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchAlapiCallDetail(
+  token: string,
+  logId: string,
+): Promise<AlapiCallDetail | null> {
+  const key = String(logId || "").trim();
+  if (!key || !token) return null;
+  const cached = detailCache.get(key);
+  if (cached) return cached;
+
+  const json = await alapiGet(token, `${DETAIL_URL}${encodeURIComponent(key)}`);
+  const d = json?.data;
+  if (!d) return null;
+
+  const obj = parsePayload(d.request_payload);
+  const detail: AlapiCallDetail = {
+    logId: String(d.log_id || key),
+    url: typeof obj?.url === "string" ? obj.url : "",
+    tokenMasked: typeof obj?.token === "string" ? obj.token : "",
+    payload: obj ? JSON.stringify(obj, null, 2) : String(d.request_payload || ""),
+  };
+  if (detailCache.size > DETAIL_CACHE_MAX) detailCache.clear();
+  detailCache.set(key, detail);
+  return detail;
+}
+
+/** 批量补链接；已缓存的直接命中，不发请求 */
+export async function fetchAlapiCallDetails(
+  logIds: string[],
+): Promise<{ ok: boolean; error?: string; details: AlapiCallDetail[]; failed: number }> {
+  const ids = Array.from(new Set(logIds.map((s) => String(s || "").trim()).filter(Boolean))).slice(0, 80);
+  if (!ids.length) return { ok: true, details: [], failed: 0 };
+
+  const token = await readAlapiToken().catch(() => "");
+  if (!token) return { ok: false, error: "未配置 ALAPI 凭据", details: [], failed: ids.length };
+
+  const details: AlapiCallDetail[] = [];
+  let failed = 0;
+  const pending: string[] = [];
+  for (const id of ids) {
+    const hit = detailCache.get(id);
+    if (hit) details.push(hit);
+    else pending.push(id);
+  }
+
+  let unauthorized = false;
+  await runPool(pending, 4, async (id) => {
+    if (unauthorized) return;
+    try {
+      const d = await fetchAlapiCallDetail(token, id);
+      if (d) details.push(d);
+      else failed++;
+    } catch (err: any) {
+      if (String(err?.message || err) === "UNAUTHORIZED") unauthorized = true;
+      failed++;
+    }
+  });
+
+  if (unauthorized && !details.length) {
+    return { ok: false, error: "ALAPI 凭据已失效，请用书签同步一次", details, failed };
+  }
+  return { ok: true, details, failed };
+}
+
+// ============ 今日额度（剩余次数） ============
+let quotaCache: { at: number; data: AlapiQuota } | null = null;
+const QUOTA_TTL = 60_000;
+
+export async function fetchAlapiQuota(): Promise<AlapiQuota> {
+  if (quotaCache && Date.now() - quotaCache.at < QUOTA_TTL) return quotaCache.data;
+
+  const empty = (error: string): AlapiQuota => ({
+    ok: false,
+    error,
+    apis: [],
+    planName: "",
+    planEndAt: "",
+    fetchedAt: new Date().toISOString(),
+  });
+
+  const token = await readAlapiToken().catch(() => "");
+  if (!token) return empty("未配置 ALAPI 凭据");
+
+  try {
+    const [list, profile] = await Promise.all([
+      alapiGet(token, QUOTA_URL),
+      alapiGet(token, PROFILE_URL).catch(() => null),
+    ]);
+    const rows: any[] = Array.isArray(list?.data?.data) ? list.data.data : [];
+    const apis: AlapiQuotaApi[] = rows.map((r) => ({
+      id: Number(r?.api_id ?? r?.api?.id ?? 0),
+      name: String(r?.api?.name || `接口 ${r?.api_id}`),
+      used: Number(r?.request?.num ?? 0),
+      success: Number(r?.request?.success_num ?? 0),
+      fail: Number(r?.request?.fail_num ?? 0),
+      remain: Number(r?.request?.can_use_num ?? 0),
+      limit: Number(r?.request?.daily_limit ?? 0),
+    }));
+    const p = profile?.data || {};
+    const data: AlapiQuota = {
+      ok: true,
+      apis,
+      planName: String(p?.plan?.name || ""),
+      planEndAt: String(p?.plan_end_at || ""),
+      fetchedAt: new Date().toISOString(),
+    };
+    quotaCache = { at: Date.now(), data };
+    return data;
+  } catch (err: any) {
+    const msg = String(err?.message || err);
+    const data = empty(
+      msg === "UNAUTHORIZED" ? "ALAPI 凭据已失效，额度暂时读不到" : `读取额度失败：${msg}`,
+    );
+    // 失败也缓存 15 秒，避免前端轮询把失败打爆
+    quotaCache = { at: Date.now() - QUOTA_TTL + 15_000, data };
+    return data;
+  }
 }
 
 export type AlapiLogResult = {
@@ -314,6 +505,7 @@ export async function fetchAlapiCalls(days: number): Promise<AlapiLogResult> {
     duration: Number(r.duration_ms || 0),
     at: r.request_timestamp || "",
     source: sourceOf(r.client_ip || "", r.referer_url || ""),
+    url: detailCache.get(String(r.log_id))?.url || "",
   }));
 
   // 时间倒序（接口本来就倒序，双保险）

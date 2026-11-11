@@ -12,7 +12,9 @@ import {
 import {
   clearAlapiToken,
   ensureAlapiSyncKey,
+  fetchAlapiCallDetails,
   fetchAlapiCalls,
+  fetchAlapiQuota,
   saveAlapiToken,
   verifyAlapiToken,
 } from "@/lib/alapi-log.server";
@@ -296,6 +298,27 @@ export const getAlapiLogs = createServerFn({ method: "GET" })
     const { supabase, userId } = context;
     await assertAdmin(supabase, userId);
     return fetchAlapiCalls(data.days);
+  });
+
+/** 今日剩余次数（我的接口额度） */
+export const getAlapiQuota = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    return fetchAlapiQuota();
+  });
+
+/** 批量取日志详情，拿到用户解析的原始链接 */
+export const getAlapiCallDetails = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({ logIds: z.array(z.string().min(1).max(40)).max(80) }).parse(input ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    return fetchAlapiCallDetails(data.logIds);
   });
 
 export const setAlapiCredential = createServerFn({ method: "POST" })

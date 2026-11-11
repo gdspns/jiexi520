@@ -1,9 +1,10 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
-import { Fragment, useEffect, useRef, useState } from "react";
-import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig, listParseLogs, getAlapiLogs, setAlapiCredential, clearAlapiCredential, getAlapiSyncKey, getInviteReport, getInviteConfig, setInviteRewards } from "@/lib/admin.functions";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig, listParseLogs, getAlapiLogs, setAlapiCredential, clearAlapiCredential, getAlapiSyncKey, getAlapiQuota, getAlapiCallDetails, getInviteReport, getInviteConfig, setInviteRewards } from "@/lib/admin.functions";
 import { deleteOrder, getPaymentConfig, listOrdersAdmin, listProductsAdmin, setPaymentConfig, upsertProduct, deleteProduct } from "@/lib/payment.functions";
+import type { AlapiCall, AlapiCallDetail } from "@/lib/alapi-log.server";
 import { supabase } from "@/integrations/supabase/client";
 import { CleanupPanel } from "@/components/cleanup-panel";
 
@@ -1157,6 +1158,8 @@ function ParseLogsPanel() {
 
 function AlapiCallsBody() {
   const fetchCalls = useServerFn(getAlapiLogs);
+  const fetchQuota = useServerFn(getAlapiQuota);
+  const fetchDetails = useServerFn(getAlapiCallDetails);
   const saveCred = useServerFn(setAlapiCredential);
   const clearCred = useServerFn(clearAlapiCredential);
   const fetchSyncKey = useServerFn(getAlapiSyncKey);
@@ -1175,9 +1178,24 @@ function AlapiCallsBody() {
   const [saving, setSaving] = useState(false);
   const [tip, setTip] = useState("");
 
+  // 日志详情（解析链接）单独拉：详情接口一条一次请求，全量拉太慢，
+  // 所以只自动补当前可见的前 N 条，剩下的点「补全更多链接」再往前推。
+  const [details, setDetails] = useState<Record<string, AlapiCallDetail>>({});
+  const [triedIds, setTriedIds] = useState<Record<string, true>>({});
+  const [detailWindow, setDetailWindow] = useState(60);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [detailModal, setDetailModal] = useState<{ call: AlapiCall; detail?: AlapiCallDetail } | null>(null);
+
   const { data, isLoading, isFetching, refetch, error } = useQuery({
     queryKey: ["alapi_logs", days],
     queryFn: () => fetchCalls({ data: { days } }),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const quotaQ = useQuery({
+    queryKey: ["alapi_quota"],
+    queryFn: () => fetchQuota(),
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
@@ -1186,11 +1204,70 @@ function AlapiCallsBody() {
   const kwl = kw.trim().toLowerCase();
   const rows = kwl
     ? calls.filter((c) =>
-        [c.apiName, c.ip, c.refererHost, c.source, String(c.status)].some((v) =>
-          String(v || "").toLowerCase().includes(kwl),
-        ),
+        [
+          c.apiName,
+          c.ip,
+          c.refererHost,
+          c.source,
+          String(c.status),
+          details[c.logId]?.url || c.url || "",
+        ].some((v) => String(v || "").toLowerCase().includes(kwl)),
       )
     : calls;
+
+  const pendingIds = useMemo(
+    () =>
+      rows
+        .slice(0, detailWindow)
+        .filter((c) => !details[c.logId] && !c.url && !triedIds[c.logId])
+        .map((c) => c.logId)
+        .slice(0, 80),
+    [rows, detailWindow, details, triedIds],
+  );
+  const pendingKey = pendingIds.join(",");
+
+  useEffect(() => {
+    if (!pendingIds.length) return;
+    let cancelled = false;
+    setLoadingDetails(true);
+    fetchDetails({ data: { logIds: pendingIds } })
+      .then((r) => {
+        if (cancelled) return;
+        if (r?.details?.length) {
+          setDetails((prev) => {
+            const next = { ...prev };
+            for (const d of r.details) next[d.logId] = d;
+            return next;
+          });
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (cancelled) return;
+        // 记下已尝试过的，避免取不到参数的日志被反复重试
+        setTriedIds((prev) => {
+          const next = { ...prev };
+          for (const id of pendingIds) next[id] = true;
+          return next;
+        });
+        setLoadingDetails(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingKey]);
+
+  const loadOneDetail = async (logId: string) => {
+    try {
+      const r = await fetchDetails({ data: { logIds: [logId] } });
+      const d = r?.details?.[0];
+      if (d) setDetails((prev) => ({ ...prev, [d.logId]: d }));
+      return d;
+    } catch {
+      return undefined;
+    }
+  };
 
   let selfN = 0,
     miniN = 0,
@@ -1392,6 +1469,60 @@ function AlapiCallsBody() {
             </div>
           )}
 
+          {quotaQ.data && !quotaQ.data.ok && quotaQ.data.apis.length === 0 && (
+            <p className="text-xs text-amber-300/80">额度读取失败：{quotaQ.data.error}</p>
+          )}
+
+          {quotaQ.data?.ok && quotaQ.data.apis.length > 0 && (
+            <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2.5 space-y-2">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                <span className="font-semibold text-slate-200">💰 我的接口 · 今日剩余次数</span>
+                {quotaQ.data.planName && (
+                  <span className="text-slate-400">
+                    {quotaQ.data.planName}
+                    {quotaQ.data.planEndAt ? ` · 到期 ${quotaQ.data.planEndAt.slice(0, 10)}` : ""}
+                  </span>
+                )}
+                <span className="ml-auto text-slate-500">
+                  每 60 秒刷新{quotaQ.data.fetchedAt ? ` · 更新于 ${new Date(quotaQ.data.fetchedAt).toLocaleTimeString("zh-CN")}` : ""}
+                </span>
+              </div>
+              {quotaQ.data.apis.map((a) => {
+                const usedByQuota = Math.max(a.limit - a.remain, 0);
+                const pct = a.limit > 0 ? Math.min(usedByQuota / a.limit, 1) : 0;
+                const low = a.remain <= 0;
+                const warn = !low && a.limit > 0 && a.remain / a.limit <= 0.1;
+                return (
+                  <div key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="w-40 truncate text-xs text-slate-300" title={a.name}>
+                      {a.name}
+                    </span>
+                    <span
+                      className={`text-lg font-bold leading-none ${
+                        low ? "text-red-300" : warn ? "text-amber-300" : "text-emerald-300"
+                      }`}
+                    >
+                      {a.remain.toLocaleString()}
+                    </span>
+                    <span className="text-xs text-slate-400">/ {a.limit.toLocaleString()} 次</span>
+                    <div className="h-1.5 min-w-[120px] flex-1 overflow-hidden rounded bg-slate-800">
+                      <div
+                        className={`h-full rounded ${low ? "bg-red-400" : warn ? "bg-amber-400" : "bg-indigo-400"}`}
+                        style={{ width: `${Math.round(pct * 100)}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-slate-400 whitespace-nowrap">
+                      今日已用 {a.used} · 成功 {a.success} · 失败 {a.fail}
+                    </span>
+                  </div>
+                );
+              })}
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                失败调用不扣次数（剩余 = 每日上限 − 成功次数）。次数每天 0 点重置，与 ALAPI 控制台「我的接口」同源。
+              </p>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center gap-2">
             {[1, 3, 7].map((d) => (
               <button
@@ -1436,40 +1567,77 @@ function AlapiCallsBody() {
                   <th className="text-left px-3 py-2 whitespace-nowrap">客户端 IP</th>
                   <th className="text-left px-3 py-2 whitespace-nowrap">状态</th>
                   <th className="text-left px-3 py-2 whitespace-nowrap">耗时</th>
+                  <th className="text-left px-3 py-2">解析链接</th>
                   <th className="text-left px-3 py-2">Referer</th>
+                  <th className="text-left px-3 py-2 whitespace-nowrap">详情</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((c) => (
-                  <tr key={c.logId} className="border-t border-slate-800 hover:bg-slate-900/50">
-                    <td className="px-3 py-2 text-slate-400 text-xs whitespace-nowrap">
-                      {c.at ? new Date(c.at).toLocaleString("zh-CN") : "—"}
-                    </td>
-                    <td className="px-3 py-2 text-slate-200 whitespace-nowrap">{c.apiName}</td>
-                    <td className="px-3 py-2">
-                      <span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded text-xs ${srcStyle(c.source)}`}>
-                        {c.source}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-slate-300 text-xs font-mono whitespace-nowrap">{c.ip || "—"}</td>
-                    <td className="px-3 py-2">
-                      <span
-                        className={`inline-block whitespace-nowrap px-2 py-0.5 rounded text-xs ${
-                          c.status === 200 ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"
-                        }`}
-                      >
-                        {c.status || "—"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{c.duration}ms</td>
-                    <td className="px-3 py-2 text-slate-500 text-xs max-w-[260px] truncate" title={c.referer}>
-                      {c.refererHost || "—"}
-                    </td>
-                  </tr>
-                ))}
+                {rows.map((c) => {
+                  const d = details[c.logId];
+                  const link = d?.url || c.url || "";
+                  return (
+                    <tr key={c.logId} className="border-t border-slate-800 hover:bg-slate-900/50">
+                      <td className="px-3 py-2 text-slate-400 text-xs whitespace-nowrap">
+                        {c.at ? new Date(c.at).toLocaleString("zh-CN") : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-slate-200 whitespace-nowrap">{c.apiName}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`inline-block whitespace-nowrap px-2 py-0.5 rounded text-xs ${srcStyle(c.source)}`}
+                        >
+                          {c.source}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-slate-300 text-xs font-mono whitespace-nowrap">{c.ip || "—"}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`inline-block whitespace-nowrap px-2 py-0.5 rounded text-xs ${
+                            c.status === 200 ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"
+                          }`}
+                        >
+                          {c.status || "—"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{c.duration}ms</td>
+                      <td className="px-3 py-2 text-xs max-w-[380px]">
+                        {link ? (
+                          <a
+                            href={link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block truncate text-indigo-300 hover:text-indigo-200 hover:underline"
+                            title={link}
+                          >
+                            {link}
+                          </a>
+                        ) : (
+                          <span className="text-slate-600">{d ? "该次调用没有链接参数" : "…"}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-slate-500 text-xs max-w-[200px] truncate" title={c.referer}>
+                        {c.refererHost || "—"}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <button
+                          onClick={async () => {
+                            setDetailModal({ call: c, detail: d });
+                            if (!d) {
+                              const got = await loadOneDetail(c.logId);
+                              if (got) setDetailModal({ call: c, detail: got });
+                            }
+                          }}
+                          className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                        >
+                          详情
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="text-center text-slate-500 py-8">
+                    <td colSpan={9} className="text-center text-slate-500 py-8">
                       {kwl ? "当前筛选条件下没有匹配记录" : data?.ok ? "这段时间没有调用记录" : "暂无数据"}
                     </td>
                   </tr>
@@ -1478,11 +1646,113 @@ function AlapiCallsBody() {
             </table>
           </div>
 
-          <p className="text-xs text-slate-500">
-            已显示 {rows.length} 条{data?.ok && data.calls.length < data.total ? `（本次取回 ${data.calls.length} 条，共 ${data.total} 条，缩小时间范围可看更细）` : ""}
-            。来源判定：客户端 IP 是本站服务器即为「本站」，Referer 带 servicewechat 的是「微信小程序」，其余归为「外部」。
-            数据每 60 秒自动刷新，与 ALAPI 控制台「调用记录」同源。
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2 mt-1">
+            <p className="text-xs text-slate-500">
+              已显示 {rows.length} 条
+              {data?.ok && data.calls.length < data.total
+                ? `（本次取回 ${data.calls.length} 条，共 ${data.total} 条，缩小时间范围可看更细）`
+                : ""}
+              。解析链接来自每条日志的详情接口
+              {loadingDetails ? "，正在补全…" : ""}
+              。来源判定：客户端 IP 是本站服务器即为「本站」，Referer 带 servicewechat 的是「微信小程序」，其余归为「外部」。
+              数据每 60 秒自动刷新，与 ALAPI 控制台同源。
+            </p>
+            {detailWindow < rows.length && (
+              <button
+                onClick={() => setDetailWindow((n) => n + 100)}
+                className="shrink-0 px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold"
+              >
+                补全更多链接（+100）
+              </button>
+            )}
+          </div>
+
+          {detailModal && (
+            <div
+              className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 sm:p-8"
+              onClick={() => setDetailModal(null)}
+            >
+              <div
+                className="w-full max-w-2xl rounded-xl border border-slate-700 bg-slate-900 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+                  <h3 className="text-sm font-bold text-slate-100">日志详情</h3>
+                  <button
+                    onClick={() => setDetailModal(null)}
+                    className="rounded px-2 py-0.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="space-y-3 p-4 text-xs">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                    <div className="col-span-2 flex gap-3">
+                      <span className="w-16 shrink-0 text-slate-500">日志ID</span>
+                      <span className="break-all font-mono text-slate-300">{detailModal.call.logId}</span>
+                    </div>
+                    <div className="flex gap-3">
+                      <span className="w-16 shrink-0 text-slate-500">状态码</span>
+                      <span
+                        className={
+                          detailModal.call.status === 200 ? "text-emerald-300" : "text-red-300"
+                        }
+                      >
+                        {detailModal.call.status || "—"}
+                      </span>
+                    </div>
+                    <div className="flex gap-3">
+                      <span className="w-16 shrink-0 text-slate-500">耗时</span>
+                      <span className="text-slate-300">{detailModal.call.duration}ms</span>
+                    </div>
+                    <div className="flex gap-3">
+                      <span className="w-16 shrink-0 text-slate-500">请求IP</span>
+                      <span className="font-mono text-slate-300">{detailModal.call.ip || "—"}</span>
+                    </div>
+                    <div className="flex gap-3">
+                      <span className="w-16 shrink-0 text-slate-500">请求时间</span>
+                      <span className="text-slate-300">
+                        {detailModal.call.at ? new Date(detailModal.call.at).toLocaleString("zh-CN") : "—"}
+                      </span>
+                    </div>
+                    <div className="flex gap-3">
+                      <span className="w-16 shrink-0 text-slate-500">接口</span>
+                      <span className="text-slate-300">{detailModal.call.apiName}</span>
+                    </div>
+                    <div className="flex gap-3">
+                      <span className="w-16 shrink-0 text-slate-500">来源</span>
+                      <span className="text-slate-300">{detailModal.call.source}</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-slate-400">
+                      请求{detailModal.detail?.tokenMasked ? "（token 由 ALAPI 脱敏）" : ""}
+                    </p>
+                    <pre className="max-h-64 overflow-auto rounded-lg border border-slate-800 bg-slate-950 p-3 font-mono text-[11px] leading-relaxed text-emerald-200">
+                      {detailModal.detail?.payload ||
+                        "读取中…（若一直为空，说明 ALAPI 没有为这次调用保存请求参数）"}
+                    </pre>
+                    {detailModal.detail?.url && (
+                      <a
+                        href={detailModal.detail.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 inline-block break-all text-indigo-300 hover:underline"
+                      >
+                        ↗ 打开这条解析链接
+                      </a>
+                    )}
+                  </div>
+
+                  <p className="text-[11px] leading-relaxed text-slate-500">
+                    ALAPI 只记录接口、IP、来源和耗时，具体解析了什么链接要看「请求」里的 url；
+                    外部项目（微信小程序等）用同一个 token 的调用也能在这里看到。
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
