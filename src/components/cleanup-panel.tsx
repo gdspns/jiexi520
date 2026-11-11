@@ -141,7 +141,7 @@ export function CleanupPanel() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+      <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <h2 className="text-base font-bold">媒体缓存定时清理</h2>
@@ -221,7 +221,7 @@ export function CleanupPanel() {
         </div>
       </section>
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+      <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
         <h3 className="text-base font-bold mb-1">清理设置</h3>
         <p className="text-xs text-slate-400 mb-4">
           间隔越短越省磁盘，但清理本身也要遍历目录；一般 60 分钟足够，磁盘紧张可以调到 10~30 分钟。

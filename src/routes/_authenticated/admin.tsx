@@ -34,11 +34,21 @@ export const Route = createFileRoute("/_authenticated/admin")({
 
 type MenuKey = "users" | "settings" | "products" | "orders" | "logs" | "invites" | "maintenance";
 
+// 手机端表格横向空间有限，时间只显示「月/日 时:分」
+function shortTime(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 function AdminPage() {
   const navigate = useNavigate();
   const [activeMenu, setActiveMenu] = useState<MenuKey>("users");
   const [productMenuOpen, setProductMenuOpen] = useState(false);
   const [maintMenuOpen, setMaintMenuOpen] = useState(true);
+  // 手机端：侧边栏收成抽屉，用顶栏汉堡按钮开合
+  const [navOpen, setNavOpen] = useState(false);
 
   const list = useServerFn(listUsers);
   const ban = useServerFn(setBanned);
@@ -350,6 +360,7 @@ function AdminPage() {
 
   const switchMenu = (key: MenuKey) => {
     setActiveMenu(key);
+    setNavOpen(false);
     if (key === "products" || key === "orders") {
       setProductMenuOpen(true);
     }
@@ -367,13 +378,35 @@ function AdminPage() {
 
   return (
     <div className="notranslate min-h-screen bg-slate-950 text-slate-100 flex" translate="no">
-      {/* Sidebar */}
-      <aside className="w-56 border-r border-slate-800 bg-slate-900/60 flex flex-col shrink-0">
-        <div className="px-4 py-5 border-b border-slate-800">
-          <h1 className="text-base font-bold text-slate-100">管理员后台</h1>
-          <p className="text-xs text-slate-500 mt-0.5">音影无损</p>
+      {/* 手机端抽屉遮罩 */}
+      {navOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+          onClick={() => setNavOpen(false)}
+          aria-hidden
+        />
+      )}
+
+      {/* Sidebar：手机/平板是抽屉，lg 以上固定在左侧 */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex h-[100dvh] w-64 max-w-[82vw] shrink-0 flex-col border-r border-slate-800 bg-slate-900 transition-transform duration-200 ease-out lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:w-56 lg:max-w-none lg:translate-x-0 ${
+          navOpen ? "translate-x-0 shadow-2xl shadow-black/60" : "-translate-x-full"
+        }`}
+      >
+        <div className="flex items-start justify-between gap-2 border-b border-slate-800 px-4 py-4 lg:py-5">
+          <div>
+            <h1 className="text-base font-bold text-slate-100">管理员后台</h1>
+            <p className="text-xs text-slate-500 mt-0.5">音影无损</p>
+          </div>
+          <button
+            onClick={() => setNavOpen(false)}
+            className="-mr-1 -mt-1 rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200 lg:hidden"
+            aria-label="关闭菜单"
+          >
+            ✕
+          </button>
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-auto overscroll-contain lg:py-4">
           {menuItems.map((m) => (
             <button key={m.key} onClick={() => switchMenu(m.key)} className={sidebarItemClass(m.key)}>
               <span>{m.icon}</span>
@@ -446,19 +479,30 @@ function AdminPage() {
 
       {/* Main Content */}
       <main className="flex-1 min-w-0">
-        <header className="border-b border-slate-800 bg-slate-900/40 px-6 py-4 sticky top-0 z-10">
-          <h2 className="text-lg font-bold">
-            {activeMenu === "users" && "用户管理"}
-            {activeMenu === "settings" && "系统配置"}
-            {activeMenu === "products" && "充值商品管理"}
-            {activeMenu === "orders" && "订单管理"}
-            {activeMenu === "logs" && "解析日志"}
-            {activeMenu === "invites" && "邀请拉新"}
-            {activeMenu === "maintenance" && "系统维护 / 定时清理"}
-          </h2>
+        <header className="border-b border-slate-800 bg-slate-900/40 px-4 py-3 sm:px-6 sm:py-4 sticky top-0 z-30 backdrop-blur">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setNavOpen(true)}
+              className="-ml-1 shrink-0 rounded-lg px-2 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-slate-100 lg:hidden"
+              aria-label="打开菜单"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <h2 className="text-base font-bold sm:text-lg truncate">
+              {activeMenu === "users" && "用户管理"}
+              {activeMenu === "settings" && "系统配置"}
+              {activeMenu === "products" && "充值商品管理"}
+              {activeMenu === "orders" && "订单管理"}
+              {activeMenu === "logs" && "解析日志"}
+              {activeMenu === "invites" && "邀请拉新"}
+              {activeMenu === "maintenance" && "系统维护 / 定时清理"}
+            </h2>
+          </div>
         </header>
 
-        <div className="px-6 py-6 max-w-6xl">
+        <div className="px-4 py-4 pb-16 max-w-6xl sm:px-6 sm:py-6 sm:pb-6">
           {/* ========== 用户管理 ========== */}
           {activeMenu === "users" && (
             <>
@@ -472,8 +516,8 @@ function AdminPage() {
                         <th className="text-left px-4 py-3">邮箱</th>
                         <th className="text-left px-4 py-3">角色</th>
                         <th className="text-left px-4 py-3">剩余次数</th>
-                        <th className="text-left px-4 py-3">注册时间</th>
-                        <th className="text-left px-4 py-3">最近登录</th>
+                        <th className="hidden text-left px-4 py-3 md:table-cell">注册时间</th>
+                        <th className="hidden text-left px-4 py-3 md:table-cell">最近登录</th>
                         <th className="text-left px-4 py-3">状态</th>
                         <th className="text-right px-4 py-3">操作</th>
                       </tr>
@@ -481,7 +525,7 @@ function AdminPage() {
                     <tbody>
                       {data.map((u) => (
                         <tr key={u.id} className="border-t border-slate-800 hover:bg-slate-900/50">
-                          <td className="px-4 py-3 font-mono text-xs">{u.email}</td>
+                          <td className="px-4 py-3 font-mono text-xs break-all max-w-[150px] sm:max-w-none">{u.email}</td>
                           <td className="px-4 py-3">
                             {u.roles.includes("admin") ? (
                               <span className="px-2 py-0.5 rounded bg-pink-500/20 text-pink-300 text-xs">admin</span>
@@ -524,8 +568,8 @@ function AdminPage() {
                               >+</button>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-slate-400">{new Date(u.created_at).toLocaleString("zh-CN")}</td>
-                          <td className="px-4 py-3 text-slate-400">{u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleString("zh-CN") : "—"}</td>
+                          <td className="hidden px-4 py-3 text-slate-400 md:table-cell">{new Date(u.created_at).toLocaleString("zh-CN")}</td>
+                          <td className="hidden px-4 py-3 text-slate-400 md:table-cell">{u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleString("zh-CN") : "—"}</td>
                           <td className="px-4 py-3">
                             {u.banned ? (
                               <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-300 text-xs">已封禁</span>
@@ -564,30 +608,30 @@ function AdminPage() {
           {/* ========== 系统配置 ========== */}
           {activeMenu === "settings" && (
             <div className="space-y-6">
-              <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+              <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
                 <h2 className="text-base font-bold mb-1">注册赠送设置</h2>
                 <p className="text-xs text-slate-400 mb-3">新用户注册成功后自动赠送的解析次数（管理员账号始终不限）。</p>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                   <label className="text-sm text-slate-300">默认赠送：</label>
                   <input
                     type="number"
                     min={0}
                     value={bonus}
                     onChange={(e) => setBonus(e.target.value === "" ? "" : parseInt(e.target.value, 10))}
-                    className="w-28 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm focus:outline-none focus:border-pink-500"
+                    className="w-24 sm:w-28 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm focus:outline-none focus:border-pink-500"
                   />
                   <span className="text-sm text-slate-400">次</span>
                   <button
                     onClick={onSaveBonus}
                     disabled={savingBonus || bonus === ""}
-                    className="ml-2 px-4 py-2 rounded-lg bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white text-sm font-semibold disabled:opacity-50"
+                    className="px-4 py-2 rounded-lg bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white text-sm font-semibold disabled:opacity-50 sm:ml-2"
                   >
                     {savingBonus ? "保存中..." : "保存"}
                   </button>
                 </div>
               </section>
 
-              <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+              <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
                 <h2 className="text-base font-bold mb-1">解析 API 配置</h2>
                 <p className="text-xs text-slate-400 mb-3">配置视频解析接口地址与密钥，保存后立即对所有用户生效。</p>
                 <div className="space-y-3">
@@ -663,7 +707,7 @@ function AdminPage() {
                 </div>
               </section>
 
-              <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+              <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
                 <h2 className="text-base font-bold mb-1">支付配置（虎皮椒 / 官方商户）</h2>
                 <p className="text-xs text-slate-400 mb-3">微信、支付宝可分别选择虎皮椒或官方商户，保留原虎皮椒配置随时切换。</p>
                 <div className="grid md:grid-cols-2 gap-4">
@@ -772,13 +816,13 @@ function AdminPage() {
 
           {/* ========== 充值商品管理 ========== */}
           {activeMenu === "products" && (
-            <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-              <div className="flex items-center justify-between mb-2">
+            <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
+              <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
                 <div>
                   <h2 className="text-base font-bold">充值商品管理</h2>
                   <p className="text-xs text-slate-400 mt-1">价格与折扣价以元为单位，支持两位小数（如 9.90）。次数为该商品支付成功后赠送的解析次数。</p>
                 </div>
-                <button onClick={addNewProduct} className="px-3 py-1.5 rounded-md bg-pink-600 hover:bg-pink-500 text-white text-xs font-semibold">+ 新增商品</button>
+                <button onClick={addNewProduct} className="shrink-0 px-3 py-1.5 rounded-md bg-pink-600 hover:bg-pink-500 text-white text-xs font-semibold">+ 新增商品</button>
               </div>
               {loadingProds ? (
                 <p className="text-slate-400 text-sm">加载中...</p>
@@ -835,8 +879,8 @@ function AdminPage() {
 
           {/* ========== 订单管理 ========== */}
           {activeMenu === "orders" && (
-            <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-              <div className="flex items-center justify-between mb-4">
+            <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
+              <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
                 <div>
                   <h2 className="text-base font-bold">订单管理</h2>
                   <p className="text-xs text-slate-400 mt-1">查看所有用户的充值订单，金额单位为分。</p>
@@ -844,7 +888,7 @@ function AdminPage() {
                 <button
                   onClick={reloadOrders}
                   disabled={loadingOrders}
-                  className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold disabled:opacity-50"
+                  className="shrink-0 px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold disabled:opacity-50"
                 >
                   {loadingOrders ? "刷新中..." : "🔄 刷新"}
                 </button>
@@ -994,7 +1038,7 @@ function ParseLogsPanel() {
   ];
 
   return (
-    <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+    <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
           <h2 className="text-base font-bold">解析日志</h2>
@@ -1004,7 +1048,7 @@ function ParseLogsPanel() {
               : "直接读取 ALAPI 控制台的调用记录：本站后端、微信小程序、其他接入方用同一个 token 的每一次调用都在这里，含来源 IP 与耗时。"}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           <div className="flex rounded-md border border-slate-700 overflow-hidden text-xs font-semibold">
             <button
               onClick={() => setView("parse")}
@@ -1025,12 +1069,12 @@ function ParseLogsPanel() {
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
                 placeholder="搜索链接 / 平台 / 用户"
-                className="w-52 rounded-md bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                className="min-w-0 flex-1 rounded-md bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 sm:w-52 sm:flex-none"
               />
               <button
                 onClick={() => refetch()}
                 disabled={isFetching}
-                className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold disabled:opacity-50"
+                className="shrink-0 px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold disabled:opacity-50"
               >
                 {isFetching ? "刷新中..." : "🔄 刷新"}
               </button>
@@ -1077,23 +1121,24 @@ function ParseLogsPanel() {
               <tr>
                 <th className="text-left px-3 py-2 whitespace-nowrap">时间</th>
                 <th className="text-left px-3 py-2">平台</th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">类型</th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">线路</th>
+                <th className="hidden text-left px-3 py-2 whitespace-nowrap sm:table-cell">类型</th>
+                <th className="hidden text-left px-3 py-2 whitespace-nowrap sm:table-cell">线路</th>
                 <th className="text-left px-3 py-2">状态</th>
                 <th className="text-left px-3 py-2">用户</th>
                 <th className="text-left px-3 py-2">链接</th>
-                <th className="text-left px-3 py-2">备注</th>
+                <th className="hidden text-left px-3 py-2 md:table-cell">备注</th>
               </tr>
             </thead>
             <tbody>
               {logs.map((l) => (
                 <tr key={l.id} className="border-t border-slate-800 hover:bg-slate-900/50 align-top">
                   <td className="px-3 py-2 text-slate-400 text-xs whitespace-nowrap">
-                    {new Date(l.created_at).toLocaleString("zh-CN")}
+                    <span className="sm:hidden">{shortTime(l.created_at)}</span>
+                    <span className="hidden sm:inline">{new Date(l.created_at).toLocaleString("zh-CN")}</span>
                   </td>
                   <td className="px-3 py-2 text-slate-200 whitespace-nowrap">{l.platform || "—"}</td>
-                  <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{typeLabel(l.type)}</td>
-                  <td className="px-3 py-2">
+                  <td className="hidden px-3 py-2 text-slate-300 text-xs whitespace-nowrap sm:table-cell">{typeLabel(l.type)}</td>
+                  <td className="hidden px-3 py-2 sm:table-cell">
                     <span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded text-xs ${l.proxy_on ? "bg-blue-500/20 text-blue-300" : "bg-slate-500/20 text-slate-400"}`}>
                       {l.proxy_on ? "代理" : "直连"}
                     </span>
@@ -1101,7 +1146,7 @@ function ParseLogsPanel() {
                   <td className="px-3 py-2">
                     <span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded text-xs ${statusStyle(l.status)}`}>{l.status}</span>
                   </td>
-                  <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{userOf(l.message) || "—"}</td>
+                  <td className="px-3 py-2 text-slate-300 text-xs max-w-[130px] break-all sm:max-w-none sm:whitespace-nowrap">{userOf(l.message) || "—"}</td>
                   <td className="px-3 py-2 text-xs max-w-[420px]">
                     {l.url ? (
                       <a
@@ -1118,7 +1163,7 @@ function ParseLogsPanel() {
                     )}
                   </td>
                   <td
-                    className="px-3 py-2 text-slate-400 text-xs max-w-[320px] break-words"
+                    className="hidden px-3 py-2 text-slate-400 text-xs max-w-[320px] break-words md:table-cell"
                     title={noteOf(l.message)}
                   >
                     <div className="max-h-[3.2rem] overflow-hidden">{noteOf(l.message) || "—"}</div>
@@ -1350,7 +1395,7 @@ function AlapiCallsBody() {
             · 数据更新于 {new Date(data.fetchedAt).toLocaleTimeString("zh-CN")}
           </span>
         )}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex w-full items-center justify-end gap-2 sm:w-auto">
           <button
             onClick={() => setEditing((v) => !v)}
             className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold"
@@ -1488,7 +1533,7 @@ function AlapiCallsBody() {
                 const warn = !low && a.limit > 0 && a.remain / a.limit <= 0.1;
                 return (
                   <div key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <span className="w-40 truncate text-xs text-slate-300" title={a.name}>
+                    <span className="w-full truncate text-xs text-slate-300 sm:w-40" title={a.name}>
                       {a.name}
                     </span>
                     <span
@@ -1547,7 +1592,7 @@ function AlapiCallsBody() {
               value={kw}
               onChange={(e) => setKw(e.target.value)}
               placeholder="搜索接口 / IP / 来源"
-              className="ml-auto w-44 rounded-md bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+              className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 sm:ml-auto sm:w-44"
             />
           </div>
 
@@ -1558,11 +1603,11 @@ function AlapiCallsBody() {
                   <th className="text-left px-3 py-2 whitespace-nowrap">调用时间</th>
                   <th className="text-left px-3 py-2">接口</th>
                   <th className="text-left px-3 py-2 whitespace-nowrap">来源</th>
-                  <th className="text-left px-3 py-2 whitespace-nowrap">客户端 IP</th>
+                  <th className="hidden text-left px-3 py-2 whitespace-nowrap sm:table-cell">客户端 IP</th>
                   <th className="text-left px-3 py-2 whitespace-nowrap">状态</th>
-                  <th className="text-left px-3 py-2 whitespace-nowrap">耗时</th>
+                  <th className="hidden text-left px-3 py-2 whitespace-nowrap sm:table-cell">耗时</th>
                   <th className="text-left px-3 py-2">解析链接</th>
-                  <th className="text-left px-3 py-2">Referer</th>
+                  <th className="hidden text-left px-3 py-2 md:table-cell">Referer</th>
                 </tr>
               </thead>
               <tbody>
@@ -1572,7 +1617,8 @@ function AlapiCallsBody() {
                   return (
                     <tr key={c.logId} className="border-t border-slate-800 hover:bg-slate-900/50">
                       <td className="px-3 py-2 text-slate-400 text-xs whitespace-nowrap">
-                        {c.at ? new Date(c.at).toLocaleString("zh-CN") : "—"}
+                        <span className="sm:hidden">{c.at ? shortTime(c.at) : "—"}</span>
+                        <span className="hidden sm:inline">{c.at ? new Date(c.at).toLocaleString("zh-CN") : "—"}</span>
                       </td>
                       <td className="px-3 py-2 text-slate-200 whitespace-nowrap">{c.apiName}</td>
                       <td className="px-3 py-2">
@@ -1582,7 +1628,7 @@ function AlapiCallsBody() {
                           {c.source}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-slate-300 text-xs font-mono whitespace-nowrap">{c.ip || "—"}</td>
+                      <td className="hidden px-3 py-2 text-slate-300 text-xs font-mono whitespace-nowrap sm:table-cell">{c.ip || "—"}</td>
                       <td className="px-3 py-2">
                         <span
                           className={`inline-block whitespace-nowrap px-2 py-0.5 rounded text-xs ${
@@ -1592,8 +1638,8 @@ function AlapiCallsBody() {
                           {c.status || "—"}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{c.duration}ms</td>
-                      <td className="px-3 py-2 text-xs max-w-[460px] min-w-[220px]">
+                      <td className="hidden px-3 py-2 text-slate-300 text-xs whitespace-nowrap sm:table-cell">{c.duration}ms</td>
+                      <td className="px-3 py-2 text-xs max-w-[460px] min-w-[170px] sm:min-w-[220px]">
                         {link ? (
                           <a
                             href={link}
@@ -1610,7 +1656,7 @@ function AlapiCallsBody() {
                           </span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-slate-500 text-xs max-w-[200px] truncate" title={c.referer}>
+                      <td className="hidden px-3 py-2 text-slate-500 text-xs max-w-[200px] truncate md:table-cell" title={c.referer}>
                         {c.refererHost || "—"}
                       </td>
                     </tr>
@@ -1744,9 +1790,9 @@ function InvitesPanel() {
   };
 
   return (
-    <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-      <div className="flex items-start justify-between mb-4 gap-4">
-        <div>
+    <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between mb-4 gap-3">
+        <div className="min-w-0">
           <h2 className="text-base font-bold">邀请拉新</h2>
           <p className="text-xs text-slate-400 mt-1">
             按邀请人分组统计。每邀请一位新用户注册，邀请人与新用户各自获得解析次数；
@@ -1762,7 +1808,7 @@ function InvitesPanel() {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3 mb-4">
         <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
           <p className="text-2xl font-bold text-pink-300">{rows.length}</p>
           <p className="text-[11px] text-slate-400 mt-0.5">有邀请的用户</p>
@@ -1910,7 +1956,7 @@ function InvitesPanel() {
                         <div className="text-[11px] text-slate-400 mb-1.5">被邀请人明细</div>
                         <div className="space-y-1">
                           {(r.invitees || []).map((i, idx) => (
-                            <div key={idx} className="flex items-center justify-between gap-3 text-xs">
+                            <div key={idx} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-xs">
                               <span className="text-slate-200 truncate">{i.email || "—"}</span>
                               <span className="text-slate-500 whitespace-nowrap">
                                 {new Date(i.created_at).toLocaleString("zh-CN")}
