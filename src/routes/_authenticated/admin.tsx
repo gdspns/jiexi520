@@ -2,7 +2,7 @@ import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, useEffect, useState } from "react";
-import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig, listParseLogs, getInviteReport, getInviteConfig, setInviteRewards } from "@/lib/admin.functions";
+import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig, listParseLogs, getAlapiLogs, setAlapiCredential, clearAlapiCredential, getInviteReport, getInviteConfig, setInviteRewards } from "@/lib/admin.functions";
 import { deleteOrder, getPaymentConfig, listOrdersAdmin, listProductsAdmin, setPaymentConfig, upsertProduct, deleteProduct } from "@/lib/payment.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { CleanupPanel } from "@/components/cleanup-panel";
@@ -957,6 +957,7 @@ function AdminPage() {
 
 function ParseLogsPanel() {
   const fetchLogs = useServerFn(listParseLogs);
+  const [view, setView] = useState<"parse" | "alapi">("parse");
   const [group, setGroup] = useState<"all" | "domestic" | "overseas">("all");
   const [limit, setLimit] = useState(200);
   const [keyword, setKeyword] = useState("");
@@ -997,25 +998,50 @@ function ParseLogsPanel() {
         <div>
           <h2 className="text-base font-bold">解析日志</h2>
           <p className="text-xs text-slate-400 mt-1">
-            每次用户解析都会记一条（含链接、用户、线路、耗时），海外平台的播放/下载请求也会记 start / ok / failed。每 10 秒自动刷新。
+            {view === "parse"
+              ? "每次用户解析都会记一条（含链接、用户、线路、耗时），海外平台的播放/下载请求也会记 start / ok / failed。每 10 秒自动刷新。"
+              : "直接读取 ALAPI 控制台的调用记录：本站后端、微信小程序、其他接入方用同一个 token 的每一次调用都在这里，含来源 IP 与耗时。"}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <input
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            placeholder="搜索链接 / 平台 / 用户"
-            className="w-52 rounded-md bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
-          />
-          <button
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold disabled:opacity-50"
-          >
-            {isFetching ? "刷新中..." : "🔄 刷新"}
-          </button>
+          <div className="flex rounded-md border border-slate-700 overflow-hidden text-xs font-semibold">
+            <button
+              onClick={() => setView("parse")}
+              className={view === "parse" ? "px-3 py-1.5 bg-indigo-500/25 text-indigo-200" : "px-3 py-1.5 text-slate-300 hover:bg-slate-800"}
+            >
+              本站解析
+            </button>
+            <button
+              onClick={() => setView("alapi")}
+              className={view === "alapi" ? "px-3 py-1.5 bg-indigo-500/25 text-indigo-200" : "px-3 py-1.5 text-slate-300 hover:bg-slate-800"}
+            >
+              ALAPI 调用
+            </button>
+          </div>
+          {view === "parse" && (
+            <>
+              <input
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+                placeholder="搜索链接 / 平台 / 用户"
+                className="w-52 rounded-md bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+              />
+              <button
+                onClick={() => refetch()}
+                disabled={isFetching}
+                className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold disabled:opacity-50"
+              >
+                {isFetching ? "刷新中..." : "🔄 刷新"}
+              </button>
+            </>
+          )}
         </div>
       </div>
+
+      {view === "alapi" ? (
+        <AlapiCallsBody />
+      ) : (
+        <>
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {groups.map((g) => (
@@ -1123,7 +1149,284 @@ function ParseLogsPanel() {
           </button>
         )}
       </div>
+        </>
+      )}
     </section>
+  );
+}
+
+function AlapiCallsBody() {
+  const fetchCalls = useServerFn(getAlapiLogs);
+  const saveCred = useServerFn(setAlapiCredential);
+  const clearCred = useServerFn(clearAlapiCredential);
+
+  const [days, setDays] = useState(3);
+  const [kw, setKw] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [tokenInput, setTokenInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [tip, setTip] = useState("");
+
+  const { data, isLoading, isFetching, refetch, error } = useQuery({
+    queryKey: ["alapi_logs", days],
+    queryFn: () => fetchCalls({ data: { days } }),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const calls = data?.calls ?? [];
+  const kwl = kw.trim().toLowerCase();
+  const rows = kwl
+    ? calls.filter((c) =>
+        [c.apiName, c.ip, c.refererHost, c.source, String(c.status)].some((v) =>
+          String(v || "").toLowerCase().includes(kwl),
+        ),
+      )
+    : calls;
+
+  let selfN = 0,
+    miniN = 0,
+    extN = 0,
+    failN = 0,
+    msSum = 0;
+  for (const c of calls) {
+    if (c.source === "本站") selfN++;
+    else if (c.source === "微信小程序") miniN++;
+    else extN++;
+    if (c.status !== 200) failN++;
+    msSum += c.duration || 0;
+  }
+  const avgMs = calls.length ? Math.round(msSum / calls.length) : 0;
+
+  const srcStyle = (s: string) =>
+    s === "本站"
+      ? "bg-emerald-500/20 text-emerald-300"
+      : s === "微信小程序"
+        ? "bg-sky-500/20 text-sky-300"
+        : "bg-slate-500/20 text-slate-300";
+
+  const onSave = async () => {
+    const t = tokenInput.trim();
+    if (!t) {
+      setTip("请先粘贴 alapi_access_token");
+      return;
+    }
+    setSaving(true);
+    setTip("");
+    try {
+      const r = await saveCred({ data: { token: t } });
+      setTip(r.message);
+      if (r.ok) {
+        setEditing(false);
+        setTokenInput("");
+        await refetch();
+      }
+    } catch (e: any) {
+      setTip(e?.message || "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onClear = async () => {
+    if (!confirm("清除 ALAPI 凭据后，「ALAPI 调用」将无法查看，确定？")) return;
+    await clearCred();
+    setTip("已清除凭据");
+    await refetch();
+  };
+
+  const tk = data?.token;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2 text-xs rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
+        <span className={tk?.configured && !tk?.expired ? "text-emerald-400" : "text-amber-400"}>●</span>
+        {!tk ? (
+          <span className="text-slate-400">读取凭据状态…</span>
+        ) : !tk.configured ? (
+          <span className="text-amber-300">未配置 ALAPI 凭据，暂时看不到调用记录</span>
+        ) : (
+          <span className="text-slate-300">
+            凭据 …{tk.tail}
+            {tk.expiresAt ? ` · 有效期至 ${new Date(tk.expiresAt).toLocaleDateString("zh-CN")}` : ""}
+            {tk.expired ? " · 已过期" : ""}
+          </span>
+        )}
+        {data?.fetchedAt && (
+          <span className="text-slate-500">
+            · 数据更新于 {new Date(data.fetchedAt).toLocaleTimeString("zh-CN")}
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setEditing((v) => !v)}
+            className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold"
+          >
+            {tk?.configured ? "更新凭据" : "配置凭据"}
+          </button>
+          {tk?.configured && (
+            <button onClick={onClear} className="px-2.5 py-1 rounded bg-slate-900 hover:bg-red-500/20 text-slate-400 hover:text-red-300">
+              清除
+            </button>
+          )}
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold disabled:opacity-50"
+          >
+            {isFetching ? "刷新中..." : "🔄 刷新"}
+          </button>
+        </div>
+      </div>
+
+      {editing && (
+        <div className="rounded-lg border border-indigo-500/40 bg-indigo-500/5 p-3 space-y-2">
+          <p className="text-xs text-slate-300 leading-relaxed">
+            获取凭据（30 天有效）：先在浏览器登录{" "}
+            <a href="https://www.alapi.cn/" target="_blank" rel="noreferrer" className="text-indigo-300 hover:underline">
+              alapi.cn
+            </a>
+            ，按 <b>F12</b> 打开控制台 → <b>Console</b> → 粘贴下面这行回车，token 会自动进剪贴板：
+          </p>
+          <code className="block select-all break-all rounded bg-slate-950 border border-slate-800 px-2 py-1.5 text-[11px] text-emerald-300">
+            {'copy(document.cookie.match(/alapi_access_token=([^;]+)/)?.[1]||"")'}
+          </code>
+          <textarea
+            value={tokenInput}
+            onChange={(e) => setTokenInput(e.target.value)}
+            placeholder="把复制到的 eyJ0eXAiOiJKV1Qi... 粘贴到这里"
+            rows={3}
+            className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 font-mono"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onSave}
+              disabled={saving}
+              className="px-3 py-1.5 rounded-md bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-semibold disabled:opacity-50"
+            >
+              {saving ? "校验中..." : "校验并保存"}
+            </button>
+            <button
+              onClick={() => {
+                setEditing(false);
+                setTip("");
+              }}
+              className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold"
+            >
+              取消
+            </button>
+            {tip && <span className="text-xs text-slate-400">{tip}</span>}
+          </div>
+        </div>
+      )}
+
+      {!editing && tip && <p className="text-xs text-slate-400">{tip}</p>}
+
+      {error ? (
+        <p className="text-sm text-red-400">{(error as Error).message}</p>
+      ) : isLoading ? (
+        <p className="text-slate-400 text-sm">读取 ALAPI 调用记录…</p>
+      ) : (
+        <>
+          {data && !data.ok && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+              {data.error}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            {[1, 3, 7].map((d) => (
+              <button
+                key={d}
+                onClick={() => setDays(d)}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+                  days === d
+                    ? "bg-indigo-500/20 border-indigo-500/60 text-indigo-200"
+                    : "bg-slate-950/60 border-slate-700 text-slate-300 hover:border-slate-500"
+                }`}
+              >
+                {d === 1 ? "今天" : `最近 ${d} 天`}
+              </button>
+            ))}
+            <span className="text-xs text-slate-400 ml-1">
+              共 <b className="text-slate-200">{data?.total ?? 0}</b> 次 · 本站{" "}
+              <b className="text-emerald-300">{selfN}</b> · 小程序 <b className="text-sky-300">{miniN}</b> · 外部{" "}
+              <b className="text-slate-200">{extN}</b>
+              {failN > 0 && (
+                <>
+                  {" "}
+                  · 失败 <b className="text-red-300">{failN}</b>
+                </>
+              )}{" "}
+              · 平均 <b className="text-slate-200">{avgMs}ms</b>
+            </span>
+            <input
+              value={kw}
+              onChange={(e) => setKw(e.target.value)}
+              placeholder="搜索接口 / IP / 来源"
+              className="ml-auto w-44 rounded-md bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-slate-800 max-h-[62vh] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-900 text-slate-400 sticky top-0">
+                <tr>
+                  <th className="text-left px-3 py-2 whitespace-nowrap">调用时间</th>
+                  <th className="text-left px-3 py-2">接口</th>
+                  <th className="text-left px-3 py-2 whitespace-nowrap">来源</th>
+                  <th className="text-left px-3 py-2 whitespace-nowrap">客户端 IP</th>
+                  <th className="text-left px-3 py-2 whitespace-nowrap">状态</th>
+                  <th className="text-left px-3 py-2 whitespace-nowrap">耗时</th>
+                  <th className="text-left px-3 py-2">Referer</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((c) => (
+                  <tr key={c.logId} className="border-t border-slate-800 hover:bg-slate-900/50">
+                    <td className="px-3 py-2 text-slate-400 text-xs whitespace-nowrap">
+                      {c.at ? new Date(c.at).toLocaleString("zh-CN") : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-slate-200 whitespace-nowrap">{c.apiName}</td>
+                    <td className="px-3 py-2">
+                      <span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded text-xs ${srcStyle(c.source)}`}>
+                        {c.source}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-slate-300 text-xs font-mono whitespace-nowrap">{c.ip || "—"}</td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={`inline-block whitespace-nowrap px-2 py-0.5 rounded text-xs ${
+                          c.status === 200 ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"
+                        }`}
+                      >
+                        {c.status || "—"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{c.duration}ms</td>
+                    <td className="px-3 py-2 text-slate-500 text-xs max-w-[260px] truncate" title={c.referer}>
+                      {c.refererHost || "—"}
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="text-center text-slate-500 py-8">
+                      {kwl ? "当前筛选条件下没有匹配记录" : data?.ok ? "这段时间没有调用记录" : "暂无数据"}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="text-xs text-slate-500">
+            已显示 {rows.length} 条{data?.ok && data.calls.length < data.total ? `（本次取回 ${data.calls.length} 条，共 ${data.total} 条，缩小时间范围可看更细）` : ""}
+            。数据每 60 秒自动刷新，与 ALAPI 控制台「调用记录」同源。
+          </p>
+        </>
+      )}
+    </div>
   );
 }
 

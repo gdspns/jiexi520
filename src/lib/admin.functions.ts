@@ -9,6 +9,12 @@ import {
   saveCleanupConfig,
   startCleanupScheduler,
 } from "@/lib/media-cache.server";
+import {
+  clearAlapiToken,
+  fetchAlapiCalls,
+  saveAlapiToken,
+  verifyAlapiToken,
+} from "@/lib/alapi-log.server";
 
 async function assertAdmin(supabase: any, userId: string) {
   const [{ data: profile }, { data: roles }, authResult] = await Promise.all([
@@ -274,6 +280,44 @@ export const listParseLogs = createServerFn({ method: "GET" })
         overseas: overseas.count ?? 0,
       },
     };
+  });
+
+// ============ ALAPI 控制台调用记录 ============
+// 数据源是 ALAPI 控制台自己在用的内部接口（Bearer JWT 鉴权），不落库、45 秒缓存。
+// 这样本站后端、微信小程序、其他外部项目用同一个 token 的调用，都能在后台看到。
+
+export const getAlapiLogs = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({ days: z.number().int().min(1).max(7).default(3) }).parse(input ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    return fetchAlapiCalls(data.days);
+  });
+
+export const setAlapiCredential = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({ token: z.string().trim().min(20).max(4096) }).parse(input ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    const check = await verifyAlapiToken(data.token);
+    if (!check.ok) return { ok: false, message: check.message };
+    await saveAlapiToken(data.token);
+    return { ok: true, message: "已保存，正在用新凭据拉取调用记录" };
+  });
+
+export const clearAlapiCredential = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    await clearAlapiToken();
+    return { ok: true };
   });
 
 // ============ 拉新邀请 ============

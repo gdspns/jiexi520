@@ -1,0 +1,308 @@
+// 读取 ALAPI 控制台的「调用记录」，用于后台解析日志页的「ALAPI 调用」标签。
+//
+// 为什么不落库：
+//   1) ALAPI 没有开放调用日志 API（/api/user/log 之类全 404），只有控制台页面在用的
+//      内部接口 v3.alapi.cn/frontend/dashboard/api/log，靠 Bearer JWT 鉴权；
+//   2) 线上库没有给我们 DDL 权限，建表只能手工去 Supabase 控制台跑；
+//   3) 实时查 + 45 秒缓存，数据永远和 ALAPI 控制台一致，也不用做去重/清理。
+//
+// 凭据只存在 app_settings 的 alapi_access_token 这一行——该表 RLS 对 authenticated
+// 是 USING(false)，普通登录用户读不到，只有 service_role 能读，所以放这里安全。
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+const TOKEN_KEY = "alapi_access_token";
+const LOG_URL = "https://v3.alapi.cn/frontend/dashboard/api/log";
+const APIS_URL = "https://v3.alapi.cn/frontend/dashboard/api/user_apis";
+const UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+/** 本站生产服务器出口 IP，用来把「本站后端调用」和其他来源区分开 */
+export const SELF_SERVER_IP = "192.129.217.73";
+
+export type AlapiSource = "本站" | "微信小程序" | "外部";
+
+export type AlapiCall = {
+  logId: string;
+  apiId: number;
+  apiName: string;
+  nodeId: number;
+  status: number;
+  ip: string;
+  referer: string;
+  refererHost: string;
+  duration: number;
+  at: string;
+  source: AlapiSource;
+};
+
+export type AlapiTokenMeta = {
+  configured: boolean;
+  tail: string;
+  expiresAt: string | null;
+  expired: boolean;
+};
+
+let cachedSvc: SupabaseClient | null = null;
+
+async function serviceClient(): Promise<SupabaseClient | null> {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  if (cachedSvc) return cachedSvc;
+  const { createClient } = await import("@supabase/supabase-js");
+  cachedSvc = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  return cachedSvc;
+}
+
+function jwtExpMs(token: string): number | null {
+  const part = token.split(".")[1];
+  if (!part) return null;
+  try {
+    const json = Buffer.from(part.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+    const payload = JSON.parse(json);
+    return typeof payload?.exp === "number" ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+export function tokenMeta(token: string): AlapiTokenMeta {
+  if (!token) return { configured: false, tail: "", expiresAt: null, expired: false };
+  const exp = jwtExpMs(token);
+  return {
+    configured: true,
+    tail: token.slice(-6),
+    expiresAt: exp ? new Date(exp).toISOString() : null,
+    expired: exp ? Date.now() > exp : false,
+  };
+}
+
+export async function readAlapiToken(): Promise<string> {
+  const sb = await serviceClient();
+  if (!sb) return "";
+  const { data, error } = await sb.from("app_settings").select("value").eq("key", TOKEN_KEY).maybeSingle();
+  if (error) throw new Error(error.message);
+  const v: any = data?.value;
+  if (typeof v === "string") return v.trim();
+  if (v && typeof v === "object" && typeof v.token === "string") return v.token.trim();
+  return "";
+}
+
+export async function saveAlapiToken(token: string): Promise<void> {
+  const sb = await serviceClient();
+  if (!sb) throw new Error("服务端缺少 SUPABASE_SERVICE_ROLE_KEY");
+  const { error } = await sb
+    .from("app_settings")
+    .upsert({ key: TOKEN_KEY, value: token as any, updated_at: new Date().toISOString() });
+  if (error) throw new Error(error.message);
+  cache.clear();
+}
+
+export async function clearAlapiToken(): Promise<void> {
+  const sb = await serviceClient();
+  if (!sb) return;
+  await sb.from("app_settings").delete().eq("key", TOKEN_KEY);
+  cache.clear();
+}
+
+/** 北京时间当天 */
+function bjYmd(offsetDays = 0): string {
+  const t = new Date(Date.now() + 8 * 3600_000 - offsetDays * 86_400_000);
+  return t.toISOString().slice(0, 10);
+}
+
+function refererHost(referer: string): string {
+  if (!referer) return "";
+  try {
+    return new URL(referer).host;
+  } catch {
+    return referer.slice(0, 40);
+  }
+}
+
+function sourceOf(ip: string, referer: string): AlapiSource {
+  if (ip === SELF_SERVER_IP) return "本站";
+  if (/servicewechat\.com|weixin\.qq\.com/i.test(referer)) return "微信小程序";
+  return "外部";
+}
+
+type RawLog = {
+  log_id: string;
+  api_id: number;
+  api_node_id: number;
+  response_code: number;
+  client_ip: string;
+  request_timestamp: string;
+  referer_url?: string;
+  duration_ms: number;
+};
+
+async function alapiGet(token: string, url: string): Promise<any> {
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      "User-Agent": UA,
+      Referer: "https://www.alapi.cn/",
+    },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (res.status === 401 || res.status === 403) throw new Error("UNAUTHORIZED");
+  if (!res.ok) throw new Error(`ALAPI 接口错误 HTTP ${res.status}`);
+  const json: any = await res.json();
+  if (json?.success === false) {
+    if (json.code === 401 || json.code === 403) throw new Error("UNAUTHORIZED");
+    throw new Error(json.message || `ALAPI 接口错误 code=${json.code}`);
+  }
+  return json;
+}
+
+/** api_id → 接口名，10 分钟缓存 */
+let apiNamesCache: { at: number; map: Map<number, string> } | null = null;
+
+async function apiNames(token: string): Promise<Map<number, string>> {
+  if (apiNamesCache && Date.now() - apiNamesCache.at < 10 * 60_000) return apiNamesCache.map;
+  const map = new Map<number, string>();
+  try {
+    const json = await alapiGet(token, `${APIS_URL}?current=1&pageSize=100`);
+    const rows: any[] = Array.isArray(json?.data) ? json.data : json?.data?.data || [];
+    for (const r of rows) {
+      if (r?.id != null) map.set(Number(r.id), String(r.name || `接口 ${r.id}`));
+    }
+  } catch {
+    // 名称拿不到不影响主流程，UI 退化成「接口 68」
+  }
+  if (map.size) apiNamesCache = { at: Date.now(), map };
+  return map;
+}
+
+export type AlapiLogResult = {
+  ok: boolean;
+  error?: string;
+  needsToken?: boolean;
+  token: AlapiTokenMeta;
+  calls: AlapiCall[];
+  total: number;
+  fetchedAt: string;
+  days: number;
+};
+
+const cache = new Map<string, { at: number; result: AlapiLogResult }>();
+const CACHE_TTL = 45_000;
+
+export async function fetchAlapiCalls(days: number): Promise<AlapiLogResult> {
+  const d = Math.min(Math.max(Math.trunc(days) || 3, 1), 7);
+  const hit = cache.get(String(d));
+  if (hit && Date.now() - hit.at < CACHE_TTL) return hit.result;
+
+  const token = await readAlapiToken().catch(() => "");
+  const meta = tokenMeta(token);
+  if (!meta.configured) {
+    return {
+      ok: false,
+      error: "还没有配置 ALAPI 凭据，点右上角「配置凭据」粘贴 alapi_access_token 即可",
+      needsToken: true,
+      token: meta,
+      calls: [],
+      total: 0,
+      fetchedAt: new Date().toISOString(),
+      days: d,
+    };
+  }
+  if (meta.expired) {
+    return {
+      ok: false,
+      error: `ALAPI 凭据已于 ${new Date(meta.expiresAt!).toLocaleString("zh-CN")} 过期，请重新登录 alapi 后更新`,
+      needsToken: true,
+      token: meta,
+      calls: [],
+      total: 0,
+      fetchedAt: new Date().toISOString(),
+      days: d,
+    };
+  }
+
+  const start = bjYmd(d - 1);
+  const end = bjYmd(0);
+  const names = await apiNames(token);
+  const all: RawLog[] = [];
+  let total = 0;
+
+  try {
+    for (let page = 1; page <= 10; page++) {
+      const url =
+        `${LOG_URL}?current=${page}&pageSize=100` +
+        `&start_time=${start}+00:00&end_time=${end}+23:59`;
+      const json = await alapiGet(token, url);
+      const payload = json?.data || {};
+      const rows: RawLog[] = Array.isArray(payload.data) ? payload.data : [];
+      total = Number(payload.total ?? payload.pageInfo?.total ?? rows.length);
+      all.push(...rows);
+      const totalPage = Number(payload.pageInfo?.totalPage ?? Math.ceil(total / 100) ?? 1);
+      if (page >= totalPage || rows.length === 0) break;
+    }
+  } catch (err: any) {
+    const msg = String(err?.message || err);
+    const unauthorized = msg === "UNAUTHORIZED";
+    const result: AlapiLogResult = {
+      ok: false,
+      error: unauthorized
+        ? "ALAPI 凭据已失效（可能在其他设备退出登录或改过密码），请重新登录 alapi 更新凭据"
+        : msg === "The operation was aborted due to timeout" || /aborted/i.test(msg)
+          ? "连接 ALAPI 超时，稍后重试"
+          : msg,
+      needsToken: unauthorized,
+      token: meta,
+      calls: [],
+      total: 0,
+      fetchedAt: new Date().toISOString(),
+      days: d,
+    };
+    cache.set(String(d), { at: Date.now(), result });
+    return result;
+  }
+
+  const calls: AlapiCall[] = all.map((r) => ({
+    logId: String(r.log_id),
+    apiId: Number(r.api_id || 0),
+    apiName: names.get(Number(r.api_id)) || `接口 ${r.api_id}`,
+    nodeId: Number(r.api_node_id || 0),
+    status: Number(r.response_code || 0),
+    ip: r.client_ip || "",
+    referer: r.referer_url || "",
+    refererHost: refererHost(r.referer_url || ""),
+    duration: Number(r.duration_ms || 0),
+    at: r.request_timestamp || "",
+    source: sourceOf(r.client_ip || "", r.referer_url || ""),
+  }));
+
+  // 时间倒序（接口本来就倒序，双保险）
+  calls.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+
+  const result: AlapiLogResult = {
+    ok: true,
+    token: meta,
+    calls,
+    total: total || calls.length,
+    fetchedAt: new Date().toISOString(),
+    days: d,
+  };
+  cache.set(String(d), { at: Date.now(), result });
+  return result;
+}
+
+/** 配置凭据前先验一下：能不能拉到日志 */
+export async function verifyAlapiToken(token: string): Promise<{ ok: boolean; message: string }> {
+  const t = token.replace(/^Bearer\s+/i, "").trim();
+  if (t.length < 40 || !t.includes(".")) return { ok: false, message: "这不像是一个有效的 alapi_access_token" };
+  const meta = tokenMeta(t);
+  if (meta.expired) return { ok: false, message: "该凭据已经过期，请重新登录 alapi 后再复制" };
+  try {
+    const url = `${LOG_URL}?current=1&pageSize=1&start_time=${bjYmd(0)}+00:00&end_time=${bjYmd(0)}+23:59`;
+    await alapiGet(t, url);
+    return { ok: true, message: "凭据有效" };
+  } catch (err: any) {
+    const msg = String(err?.message || err);
+    return { ok: false, message: msg === "UNAUTHORIZED" ? "凭据无效或已失效" : msg };
+  }
+}
