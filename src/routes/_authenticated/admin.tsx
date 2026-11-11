@@ -1214,8 +1214,8 @@ function AlapiCallsBody() {
       )
     : calls;
 
-  // ALAPI 的「日志详情」接口单条约 5 秒，无法一次取全，所以做成队列：
-  // 每次并发取 5 条，取到一批立刻渲染，链接在列表里逐行出现。
+  // ALAPI 的「日志详情」接口单条约 1~5 秒，且服务端只能串行取（并发会被判「日志不存在」），
+  // 所以做成队列：每批 3 条，取到一批立刻渲染，链接在列表里逐行出现。
   const queueRef = useRef<string[]>([]);
   const runningRef = useRef(false);
   const rowsKey = `${days}|${rows.length}|${rows[0]?.logId || ""}|${detailWindow}`;
@@ -1226,7 +1226,7 @@ function AlapiCallsBody() {
     setLoadingDetails(true);
     try {
       while (queueRef.current.length) {
-        const chunk = queueRef.current.splice(0, 5);
+        const chunk = queueRef.current.splice(0, 3);
         try {
           const r = await fetchDetails({ data: { logIds: chunk } });
           if (r?.details?.length) {

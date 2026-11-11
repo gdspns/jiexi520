@@ -255,17 +255,8 @@ const DETAIL_TTL_DAYS = 45;
 const detailCache = new Map<string, AlapiCallDetail>();
 const DETAIL_CACHE_MAX = 4000;
 
-/** 简单的并发闸门：ALAPI 控制台接口按账号串行处理，开太多反而更慢 */
-async function runPool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (cursor < items.length) {
-      const item = items[cursor++];
-      await fn(item).catch(() => undefined);
-    }
-  });
-  await Promise.all(workers);
-}
+/** 两次详情请求之间的最小间隔 */
+const DETAIL_GAP_MS = 250;
 
 type PayloadObj = { url?: unknown; token?: unknown };
 
@@ -381,7 +372,7 @@ export async function preloadDetailUrls(logIds: string[]): Promise<Map<string, s
 export async function fetchAlapiCallDetails(
   logIds: string[],
 ): Promise<{ ok: boolean; error?: string; details: AlapiCallDetail[]; failed: number }> {
-  const ids = Array.from(new Set(logIds.map((s) => String(s || "").trim()).filter(Boolean))).slice(0, 80);
+  const ids = Array.from(new Set(logIds.map((s) => String(s || "").trim()).filter(Boolean))).slice(0, 40);
   if (!ids.length) return { ok: true, details: [], failed: 0 };
 
   const known = await loadDetailsFromDb(ids);
@@ -392,11 +383,12 @@ export async function fetchAlapiCallDetails(
   const token = await readAlapiToken().catch(() => "");
   if (!token) return { ok: false, error: "未配置 ALAPI 凭据", details, failed: pending.length };
 
+  // 必须串行：实测同一条日志串行 12/12 成功，8 并发 0/12 成功
+  // （ALAPI 对并发会返回假的「日志不存在」），所以一条一条来，中间留点间隔。
   const fetched: AlapiCallDetail[] = [];
   let failed = 0;
   let unauthorized = false;
-  await runPool(pending, 8, async (id) => {
-    if (unauthorized) return;
+  for (const id of pending) {
     try {
       const d = await fetchAlapiCallDetail(token, id);
       if (d) fetched.push(d);
@@ -405,7 +397,8 @@ export async function fetchAlapiCallDetails(
       if (String(err?.message || err) === "UNAUTHORIZED") unauthorized = true;
       failed++;
     }
-  });
+    await new Promise((r) => setTimeout(r, DETAIL_GAP_MS));
+  }
 
   details.push(...fetched);
   if (fetched.length) await saveDetailsToDb(fetched);
@@ -422,7 +415,7 @@ export async function fetchAlapiCallDetails(
 // 详情接口不扣调用次数，只是耗服务器出口带宽和一点点时间。
 const WARM_KEY = Symbol.for("jiexi520.alapi.warm");
 const WARM_TICK_MS = 6 * 60_000;
-const WARM_BATCH = 24;
+const WARM_BATCH = 30;
 
 export async function warmAlapiDetails(limit = WARM_BATCH): Promise<{ fetched: number; missing: number }> {
   const token = await readAlapiToken().catch(() => "");
