@@ -510,7 +510,7 @@ function AdminPage() {
               {error && <p className="text-red-400">加载失败：{(error as Error).message}</p>}
               {data && (
                 <div className="overflow-x-auto rounded-xl border border-slate-800">
-                  <table className="w-full text-sm">
+                  <table className="w-full min-w-[620px] text-sm">
                     <thead className="bg-slate-900 text-slate-400">
                       <tr>
                         <th className="text-left px-4 py-3">邮箱</th>
@@ -525,12 +525,12 @@ function AdminPage() {
                     <tbody>
                       {data.map((u) => (
                         <tr key={u.id} className="border-t border-slate-800 hover:bg-slate-900/50">
-                          <td className="px-4 py-3 font-mono text-xs break-all max-w-[150px] sm:max-w-none">{u.email}</td>
+                          <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">{u.email}</td>
                           <td className="px-4 py-3">
                             {u.roles.includes("admin") ? (
-                              <span className="px-2 py-0.5 rounded bg-pink-500/20 text-pink-300 text-xs">admin</span>
+                              <span className="whitespace-nowrap px-2 py-0.5 rounded bg-pink-500/20 text-pink-300 text-xs">admin</span>
                             ) : (
-                              <span className="px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-xs">user</span>
+                              <span className="whitespace-nowrap px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-xs">user</span>
                             )}
                           </td>
                           <td className="px-4 py-3">
@@ -572,9 +572,9 @@ function AdminPage() {
                           <td className="hidden px-4 py-3 text-slate-400 md:table-cell">{u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleString("zh-CN") : "—"}</td>
                           <td className="px-4 py-3">
                             {u.banned ? (
-                              <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-300 text-xs">已封禁</span>
+                              <span className="whitespace-nowrap px-2 py-0.5 rounded bg-red-500/20 text-red-300 text-xs">已封禁</span>
                             ) : (
-                              <span className="px-2 py-0.5 rounded bg-green-500/20 text-green-300 text-xs">正常</span>
+                              <span className="whitespace-nowrap px-2 py-0.5 rounded bg-green-500/20 text-green-300 text-xs">正常</span>
                             )}
                           </td>
                           <td className="px-4 py-3 text-right space-x-2 whitespace-nowrap">
@@ -819,7 +819,7 @@ function AdminPage() {
             <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
                 <div>
-                  <h2 className="text-base font-bold">充值商品管理</h2>
+                  <h2 className="hidden text-base font-bold sm:block">充值商品管理</h2>
                   <p className="text-xs text-slate-400 mt-1">价格与折扣价以元为单位，支持两位小数（如 9.90）。次数为该商品支付成功后赠送的解析次数。</p>
                 </div>
                 <button onClick={addNewProduct} className="shrink-0 px-3 py-1.5 rounded-md bg-pink-600 hover:bg-pink-500 text-white text-xs font-semibold">+ 新增商品</button>
@@ -828,7 +828,7 @@ function AdminPage() {
                 <p className="text-slate-400 text-sm">加载中...</p>
               ) : (
                 <div className="overflow-x-auto rounded-lg border border-slate-800">
-                  <table className="w-full text-sm">
+                  <table className="w-full min-w-[760px] text-sm">
                     <thead className="bg-slate-900 text-slate-400">
                       <tr>
                         <th className="text-left px-3 py-2">名称</th>
@@ -882,7 +882,7 @@ function AdminPage() {
             <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
                 <div>
-                  <h2 className="text-base font-bold">订单管理</h2>
+                  <h2 className="hidden text-base font-bold sm:block">订单管理</h2>
                   <p className="text-xs text-slate-400 mt-1">查看所有用户的充值订单，金额单位为分。</p>
                 </div>
                 <button
@@ -897,7 +897,7 @@ function AdminPage() {
                 <p className="text-slate-400 text-sm">加载中...</p>
               ) : (
                 <div className="overflow-x-auto rounded-lg border border-slate-800">
-                  <table className="w-full text-sm">
+                  <table className="w-full min-w-[820px] text-sm">
                     <thead className="bg-slate-900 text-slate-400">
                       <tr>
                         <th className="text-left px-3 py-2">订单号</th>
@@ -1041,7 +1041,7 @@ function ParseLogsPanel() {
     <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
-          <h2 className="text-base font-bold">解析日志</h2>
+          <h2 className="hidden text-base font-bold sm:block">解析日志</h2>
           <p className="text-xs text-slate-400 mt-1">
             {view === "parse"
               ? "每次用户解析都会记一条（含链接、用户、线路、耗时），海外平台的播放/下载请求也会记 start / ok / failed。每 10 秒自动刷新。"
@@ -1116,7 +1116,7 @@ function ParseLogsPanel() {
         <p className="text-slate-400 text-sm">加载中...</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-slate-800">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[520px] text-sm">
             <thead className="bg-slate-900 text-slate-400">
               <tr>
                 <th className="text-left px-3 py-2 whitespace-nowrap">时间</th>
@@ -1124,7 +1124,7 @@ function ParseLogsPanel() {
                 <th className="hidden text-left px-3 py-2 whitespace-nowrap sm:table-cell">类型</th>
                 <th className="hidden text-left px-3 py-2 whitespace-nowrap sm:table-cell">线路</th>
                 <th className="text-left px-3 py-2">状态</th>
-                <th className="text-left px-3 py-2">用户</th>
+                <th className="hidden text-left px-3 py-2 sm:table-cell">用户</th>
                 <th className="text-left px-3 py-2">链接</th>
                 <th className="hidden text-left px-3 py-2 md:table-cell">备注</th>
               </tr>
@@ -1146,7 +1146,7 @@ function ParseLogsPanel() {
                   <td className="px-3 py-2">
                     <span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded text-xs ${statusStyle(l.status)}`}>{l.status}</span>
                   </td>
-                  <td className="px-3 py-2 text-slate-300 text-xs max-w-[130px] break-all sm:max-w-none sm:whitespace-nowrap">{userOf(l.message) || "—"}</td>
+                  <td className="hidden px-3 py-2 text-slate-300 text-xs whitespace-nowrap sm:table-cell">{userOf(l.message) || "—"}</td>
                   <td className="px-3 py-2 text-xs max-w-[420px]">
                     {l.url ? (
                       <a
@@ -1597,11 +1597,11 @@ function AlapiCallsBody() {
           </div>
 
           <div className="overflow-x-auto rounded-lg border border-slate-800 max-h-[62vh] overflow-y-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[520px] text-sm">
               <thead className="bg-slate-900 text-slate-400 sticky top-0">
                 <tr>
                   <th className="text-left px-3 py-2 whitespace-nowrap">调用时间</th>
-                  <th className="text-left px-3 py-2">接口</th>
+                  <th className="hidden text-left px-3 py-2 sm:table-cell">接口</th>
                   <th className="text-left px-3 py-2 whitespace-nowrap">来源</th>
                   <th className="hidden text-left px-3 py-2 whitespace-nowrap sm:table-cell">客户端 IP</th>
                   <th className="text-left px-3 py-2 whitespace-nowrap">状态</th>
@@ -1620,7 +1620,7 @@ function AlapiCallsBody() {
                         <span className="sm:hidden">{c.at ? shortTime(c.at) : "—"}</span>
                         <span className="hidden sm:inline">{c.at ? new Date(c.at).toLocaleString("zh-CN") : "—"}</span>
                       </td>
-                      <td className="px-3 py-2 text-slate-200 whitespace-nowrap">{c.apiName}</td>
+                      <td className="hidden px-3 py-2 text-slate-200 whitespace-nowrap sm:table-cell">{c.apiName}</td>
                       <td className="px-3 py-2">
                         <span
                           className={`inline-block whitespace-nowrap px-2 py-0.5 rounded text-xs ${srcStyle(c.source)}`}
@@ -1793,7 +1793,7 @@ function InvitesPanel() {
     <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between mb-4 gap-3">
         <div className="min-w-0">
-          <h2 className="text-base font-bold">邀请拉新</h2>
+          <h2 className="hidden text-base font-bold sm:block">邀请拉新</h2>
           <p className="text-xs text-slate-400 mt-1">
             按邀请人分组统计。每邀请一位新用户注册，邀请人与新用户各自获得解析次数；
             被邀请的新人<strong className="text-amber-300">首次充值</strong>，再额外奖励邀请人 N 次。
@@ -1903,7 +1903,7 @@ function InvitesPanel() {
         <p className="text-slate-400 text-sm">加载中...</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-slate-800">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[640px] text-sm">
             <thead className="bg-slate-900 text-slate-400">
               <tr>
                 <th className="text-left px-3 py-2">邀请人（谁拉的）</th>
