@@ -228,18 +228,31 @@ export async function fetchAlapiCalls(days: number): Promise<AlapiLogResult> {
   const all: RawLog[] = [];
   let total = 0;
 
+  const pageUrl = (page: number) =>
+    `${LOG_URL}?current=${page}&pageSize=100&start_time=${start}+00:00&end_time=${end}+23:59`;
+
   try {
-    for (let page = 1; page <= 10; page++) {
-      const url =
-        `${LOG_URL}?current=${page}&pageSize=100` +
-        `&start_time=${start}+00:00&end_time=${end}+23:59`;
-      const json = await alapiGet(token, url);
-      const payload = json?.data || {};
-      const rows: RawLog[] = Array.isArray(payload.data) ? payload.data : [];
-      total = Number(payload.total ?? payload.pageInfo?.total ?? rows.length);
-      all.push(...rows);
-      const totalPage = Number(payload.pageInfo?.totalPage ?? Math.ceil(total / 100) ?? 1);
-      if (page >= totalPage || rows.length === 0) break;
+    // 先取第一页拿到总页数，剩下的并行拉——串行翻 4 页要 8 秒以上，并行后 3 秒内
+    const first = await alapiGet(token, pageUrl(1));
+    const payload = first?.data || {};
+    const firstRows: RawLog[] = Array.isArray(payload.data) ? payload.data : [];
+    total = Number(payload.total ?? payload.pageInfo?.total ?? firstRows.length);
+    all.push(...firstRows);
+
+    const totalPage = Math.min(
+      Number(payload.pageInfo?.totalPage ?? Math.ceil(total / 100) ?? 1) || 1,
+      10,
+    );
+    if (totalPage > 1) {
+      const rest = await Promise.all(
+        Array.from({ length: totalPage - 1 }, (_, i) =>
+          alapiGet(token, pageUrl(i + 2)).catch(() => null),
+        ),
+      );
+      for (const json of rest) {
+        const rows: RawLog[] = Array.isArray(json?.data?.data) ? json.data.data : [];
+        all.push(...rows);
+      }
     }
   } catch (err: any) {
     const msg = String(err?.message || err);

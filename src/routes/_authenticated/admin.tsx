@@ -1325,7 +1325,7 @@ function AlapiCallsBody() {
       {error ? (
         <p className="text-sm text-red-400">{(error as Error).message}</p>
       ) : isLoading ? (
-        <p className="text-slate-400 text-sm">读取 ALAPI 调用记录…</p>
+        <p className="text-slate-400 text-sm">正在从 ALAPI 拉取调用记录（首次约 3~5 秒）…</p>
       ) : (
         <>
           {data && !data.ok && (
@@ -1422,7 +1422,8 @@ function AlapiCallsBody() {
 
           <p className="text-xs text-slate-500">
             已显示 {rows.length} 条{data?.ok && data.calls.length < data.total ? `（本次取回 ${data.calls.length} 条，共 ${data.total} 条，缩小时间范围可看更细）` : ""}
-            。数据每 60 秒自动刷新，与 ALAPI 控制台「调用记录」同源。
+            。来源判定：客户端 IP 是本站服务器即为「本站」，Referer 带 servicewechat 的是「微信小程序」，其余归为「外部」。
+            数据每 60 秒自动刷新，与 ALAPI 控制台「调用记录」同源。
           </p>
         </>
       )}
