@@ -346,6 +346,44 @@ function AdminPage() {
     }
   };
 
+  type UserRow = Awaited<ReturnType<typeof listUsers>>[number];
+  // 次数增减控件：表格与手机卡片共用
+  const creditControl = (u: UserRow) => (
+    <div className="flex items-center gap-1">
+      <button
+        disabled={busy === u.id}
+        onClick={() => onAdjust(u.id, -1)}
+        className="w-7 h-7 shrink-0 rounded bg-slate-800 hover:bg-slate-700 text-xs disabled:opacity-50"
+      >−</button>
+      <input
+        type="number"
+        min={0}
+        defaultValue={u.credits}
+        key={`${u.id}-${u.credits}`}
+        disabled={busy === u.id}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        }}
+        onBlur={(e) => {
+          const v = parseInt(e.target.value, 10);
+          if (!Number.isFinite(v) || v < 0) {
+            e.target.value = String(u.credits);
+            return;
+          }
+          const delta = v - u.credits;
+          if (delta === 0) return;
+          onAdjust(u.id, delta);
+        }}
+        className={`w-16 px-2 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-sm text-center focus:outline-none focus:border-pink-500 ${u.credits === 0 ? "text-red-400" : "text-slate-200"}`}
+      />
+      <button
+        disabled={busy === u.id}
+        onClick={() => onAdjust(u.id, 1)}
+        className="w-7 h-7 shrink-0 rounded bg-slate-800 hover:bg-slate-700 text-xs disabled:opacity-50"
+      >+</button>
+    </div>
+  );
+
   const logout = async () => {
     await supabase.auth.signOut();
     window.location.replace("/index.html");
@@ -509,8 +547,54 @@ function AdminPage() {
               {isLoading && <p className="text-slate-400">加载中...</p>}
               {error && <p className="text-red-400">加载失败：{(error as Error).message}</p>}
               {data && (
-                <div className="overflow-x-auto rounded-xl border border-slate-800">
-                  <table className="w-full min-w-[560px] text-sm">
+                <>
+                {/* 手机端：一行用户一张卡片，避免表格挤成竖排字 */}
+                <div className="space-y-2 sm:hidden">
+                  {data.map((u) => (
+                    <div key={u.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                      <div className="flex items-center gap-2">
+                        <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-200">{u.email}</span>
+                        {u.roles.includes("admin") && (
+                          <span className="whitespace-nowrap rounded bg-pink-500/20 px-1.5 py-0.5 text-[11px] text-pink-300">admin</span>
+                        )}
+                        {u.banned ? (
+                          <span className="whitespace-nowrap rounded bg-red-500/20 px-1.5 py-0.5 text-[11px] text-red-300">已封禁</span>
+                        ) : (
+                          <span className="whitespace-nowrap rounded bg-green-500/20 px-1.5 py-0.5 text-[11px] text-green-300">正常</span>
+                        )}
+                      </div>
+                      <div className="mt-1 text-[11px] text-slate-500">
+                        注册 {shortTime(u.created_at)}
+                        {u.last_sign_in_at ? ` · 最近登录 ${shortTime(u.last_sign_in_at)}` : ""}
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        {creditControl(u)}
+                        <div className="ml-auto flex items-center gap-2">
+                          <button
+                            disabled={busy === u.id}
+                            onClick={() => onBan(u.id, !u.banned)}
+                            className="rounded bg-slate-800 px-2.5 py-1 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-50"
+                          >
+                            {u.banned ? "解封" : "封禁"}
+                          </button>
+                          <button
+                            disabled={busy === u.id}
+                            onClick={() => onDelete(u.id, u.email)}
+                            className="rounded bg-red-600/80 px-2.5 py-1 text-xs text-white hover:bg-red-600 disabled:opacity-50"
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {data.length === 0 && (
+                    <p className="rounded-lg border border-slate-800 py-8 text-center text-sm text-slate-500">暂无用户</p>
+                  )}
+                </div>
+
+                <div className="hidden overflow-x-auto rounded-xl border border-slate-800 sm:block">
+                  <table className="w-full text-sm">
                     <thead className="bg-slate-900 text-slate-400">
                       <tr>
                         <th className="text-left px-4 py-3">邮箱</th>
@@ -533,41 +617,7 @@ function AdminPage() {
                               <span className="whitespace-nowrap px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-xs">user</span>
                             )}
                           </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1">
-                              <button
-                                disabled={busy === u.id}
-                                onClick={() => onAdjust(u.id, -1)}
-                                className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-xs disabled:opacity-50"
-                              >−</button>
-                              <input
-                                type="number"
-                                min={0}
-                                defaultValue={u.credits}
-                                key={`${u.id}-${u.credits}`}
-                                disabled={busy === u.id}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                                }}
-                                onBlur={(e) => {
-                                  const v = parseInt(e.target.value, 10);
-                                  if (!Number.isFinite(v) || v < 0) {
-                                    e.target.value = String(u.credits);
-                                    return;
-                                  }
-                                  const delta = v - u.credits;
-                                  if (delta === 0) return;
-                                  onAdjust(u.id, delta);
-                                }}
-                                className={`w-16 px-2 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-sm text-center focus:outline-none focus:border-pink-500 ${u.credits === 0 ? "text-red-400" : "text-slate-200"}`}
-                              />
-                              <button
-                                disabled={busy === u.id}
-                                onClick={() => onAdjust(u.id, 1)}
-                                className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-xs disabled:opacity-50"
-                              >+</button>
-                            </div>
-                          </td>
+                          <td className="px-4 py-3">{creditControl(u)}</td>
                           <td className="hidden px-4 py-3 text-slate-400 md:table-cell">{new Date(u.created_at).toLocaleString("zh-CN")}</td>
                           <td className="hidden px-4 py-3 text-slate-400 md:table-cell">{u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleString("zh-CN") : "—"}</td>
                           <td className="px-4 py-3">
@@ -601,6 +651,7 @@ function AdminPage() {
                     </tbody>
                   </table>
                 </div>
+                </>
               )}
             </>
           )}
