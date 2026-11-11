@@ -510,11 +510,11 @@ function AdminPage() {
               {error && <p className="text-red-400">加载失败：{(error as Error).message}</p>}
               {data && (
                 <div className="overflow-x-auto rounded-xl border border-slate-800">
-                  <table className="w-full min-w-[620px] text-sm">
+                  <table className="w-full min-w-[560px] text-sm">
                     <thead className="bg-slate-900 text-slate-400">
                       <tr>
                         <th className="text-left px-4 py-3">邮箱</th>
-                        <th className="text-left px-4 py-3">角色</th>
+                        <th className="hidden text-left px-4 py-3 sm:table-cell">角色</th>
                         <th className="text-left px-4 py-3">剩余次数</th>
                         <th className="hidden text-left px-4 py-3 md:table-cell">注册时间</th>
                         <th className="hidden text-left px-4 py-3 md:table-cell">最近登录</th>
@@ -526,7 +526,7 @@ function AdminPage() {
                       {data.map((u) => (
                         <tr key={u.id} className="border-t border-slate-800 hover:bg-slate-900/50">
                           <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">{u.email}</td>
-                          <td className="px-4 py-3">
+                          <td className="hidden px-4 py-3 sm:table-cell">
                             {u.roles.includes("admin") ? (
                               <span className="whitespace-nowrap px-2 py-0.5 rounded bg-pink-500/20 text-pink-300 text-xs">admin</span>
                             ) : (
@@ -1115,8 +1115,42 @@ function ParseLogsPanel() {
       ) : isLoading ? (
         <p className="text-slate-400 text-sm">加载中...</p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-slate-800">
-          <table className="w-full min-w-[520px] text-sm">
+        <>
+        {/* 手机端：日志量多字段长，用卡片代替表格，免得横向滚动看半截链接 */}
+        <div className="space-y-2 sm:hidden">
+          {logs.map((l) => (
+            <div key={l.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-400">
+                <span className="whitespace-nowrap">{shortTime(l.created_at)}</span>
+                <span className="font-semibold text-slate-200">{l.platform || "—"}</span>
+                <span className={`px-1.5 py-0.5 rounded ${statusStyle(l.status)}`}>{l.status}</span>
+                <span className="ml-auto text-slate-500">
+                  {typeLabel(l.type)} · {l.proxy_on ? "代理" : "直连"}
+                </span>
+              </div>
+              <div className="mt-1.5 text-xs leading-snug break-all">
+                {l.url ? (
+                  <a href={l.url} target="_blank" rel="noreferrer" className="text-indigo-300">
+                    {l.url}
+                  </a>
+                ) : (
+                  <span className="text-slate-500">—</span>
+                )}
+              </div>
+              <div className="mt-1 text-[11px] text-slate-500 break-words">
+                {userOf(l.message) || "—"} · {noteOf(l.message) || "无备注"}
+              </div>
+            </div>
+          ))}
+          {logs.length === 0 && (
+            <p className="rounded-lg border border-slate-800 py-8 text-center text-sm text-slate-500">
+              {kw ? "当前筛选条件下没有匹配记录" : "暂无日志"}
+            </p>
+          )}
+        </div>
+
+        <div className="hidden overflow-x-auto rounded-lg border border-slate-800 sm:block">
+          <table className="w-full text-sm">
             <thead className="bg-slate-900 text-slate-400">
               <tr>
                 <th className="text-left px-3 py-2 whitespace-nowrap">时间</th>
@@ -1180,6 +1214,7 @@ function ParseLogsPanel() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       <div className="flex items-center justify-between mt-3">
@@ -1596,7 +1631,51 @@ function AlapiCallsBody() {
             />
           </div>
 
-          <div className="overflow-x-auto rounded-lg border border-slate-800 max-h-[62vh] overflow-y-auto">
+          {/* 手机端：一次调用一张卡片，链接完整换行显示 */}
+          <div className="space-y-2 sm:hidden">
+            {rows.map((c, idx) => {
+              const d = details[c.logId];
+              const link = d?.url || c.url || "";
+              return (
+                <div key={c.logId} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-400">
+                    <span className="whitespace-nowrap">{c.at ? shortTime(c.at) : "—"}</span>
+                    <span className={`px-1.5 py-0.5 rounded ${srcStyle(c.source)}`}>{c.source}</span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded ${
+                        c.status === 200 ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"
+                      }`}
+                    >
+                      {c.status || "—"}
+                    </span>
+                    <span className="ml-auto whitespace-nowrap text-slate-500">{c.duration}ms</span>
+                  </div>
+                  <div className="mt-1.5 text-xs leading-snug break-all">
+                    {link ? (
+                      <a href={link} target="_blank" rel="noreferrer" className="text-indigo-300">
+                        {link}
+                      </a>
+                    ) : (
+                      <span className="text-slate-600">
+                        {d ? "无链接参数" : idx < detailWindow ? "读取中…" : "待补全"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-2 text-[11px] text-slate-500">
+                    <span className="font-mono">{c.ip || "—"}</span>
+                    {c.refererHost && <span className="break-all">{c.refererHost}</span>}
+                  </div>
+                </div>
+              );
+            })}
+            {rows.length === 0 && (
+              <p className="rounded-lg border border-slate-800 py-8 text-center text-sm text-slate-500">
+                {kwl ? "当前筛选条件下没有匹配记录" : data?.ok ? "这段时间没有调用记录" : "暂无数据"}
+              </p>
+            )}
+          </div>
+
+          <div className="hidden overflow-x-auto rounded-lg border border-slate-800 max-h-[62vh] overflow-y-auto sm:block">
             <table className="w-full min-w-[520px] text-sm">
               <thead className="bg-slate-900 text-slate-400 sticky top-0">
                 <tr>
