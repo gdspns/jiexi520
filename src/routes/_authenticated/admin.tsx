@@ -1,7 +1,7 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig, listParseLogs, getAlapiLogs, setAlapiCredential, clearAlapiCredential, getAlapiSyncKey, getAlapiQuota, getAlapiCallDetails, getInviteReport, getInviteConfig, setInviteRewards } from "@/lib/admin.functions";
 import { deleteOrder, getPaymentConfig, listOrdersAdmin, listProductsAdmin, setPaymentConfig, upsertProduct, deleteProduct } from "@/lib/payment.functions";
 import type { AlapiCallDetail } from "@/lib/alapi-log.server";
@@ -1182,7 +1182,7 @@ function AlapiCallsBody() {
   // 所以只自动补当前可见的前 N 条，剩下的点「补全更多链接」再往前推。
   const [details, setDetails] = useState<Record<string, AlapiCallDetail>>({});
   const [triedIds, setTriedIds] = useState<Record<string, true>>({});
-  const [detailWindow, setDetailWindow] = useState(60);
+  const [detailWindow, setDetailWindow] = useState(24);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
   const { data, isLoading, isFetching, refetch, error } = useQuery({
@@ -1214,48 +1214,54 @@ function AlapiCallsBody() {
       )
     : calls;
 
-  const pendingIds = useMemo(
-    () =>
-      rows
-        .slice(0, detailWindow)
-        .filter((c) => !details[c.logId] && !c.url && !triedIds[c.logId])
-        .map((c) => c.logId)
-        .slice(0, 80),
-    [rows, detailWindow, details, triedIds],
-  );
-  const pendingKey = pendingIds.join(",");
+  // ALAPI 的「日志详情」接口单条约 5 秒，无法一次取全，所以做成队列：
+  // 每次并发取 5 条，取到一批立刻渲染，链接在列表里逐行出现。
+  const queueRef = useRef<string[]>([]);
+  const runningRef = useRef(false);
+  const rowsKey = `${days}|${rows.length}|${rows[0]?.logId || ""}|${detailWindow}`;
 
-  useEffect(() => {
-    if (!pendingIds.length) return;
-    let cancelled = false;
+  const pumpDetails = async () => {
+    if (runningRef.current) return;
+    runningRef.current = true;
     setLoadingDetails(true);
-    fetchDetails({ data: { logIds: pendingIds } })
-      .then((r) => {
-        if (cancelled) return;
-        if (r?.details?.length) {
-          setDetails((prev) => {
-            const next = { ...prev };
-            for (const d of r.details) next[d.logId] = d;
-            return next;
-          });
+    try {
+      while (queueRef.current.length) {
+        const chunk = queueRef.current.splice(0, 5);
+        try {
+          const r = await fetchDetails({ data: { logIds: chunk } });
+          if (r?.details?.length) {
+            setDetails((prev) => {
+              const next = { ...prev };
+              for (const d of r.details) next[d.logId] = d;
+              return next;
+            });
+          }
+        } catch {
+          // 单批失败不影响后面的批次
         }
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (cancelled) return;
         // 记下已尝试过的，避免取不到参数的日志被反复重试
         setTriedIds((prev) => {
           const next = { ...prev };
-          for (const id of pendingIds) next[id] = true;
+          for (const id of chunk) next[id] = true;
           return next;
         });
-        setLoadingDetails(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      }
+    } finally {
+      runningRef.current = false;
+      setLoadingDetails(false);
+    }
+  };
+
+  useEffect(() => {
+    const todo = rows
+      .slice(0, detailWindow)
+      .filter((c) => !details[c.logId] && !c.url && !triedIds[c.logId] && !queueRef.current.includes(c.logId))
+      .map((c) => c.logId);
+    if (!todo.length) return;
+    queueRef.current.push(...todo);
+    void pumpDetails();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingKey]);
+  }, [rowsKey, details, triedIds]);
 
   let selfN = 0,
     miniN = 0,
@@ -1632,10 +1638,10 @@ function AlapiCallsBody() {
             </p>
             {detailWindow < rows.length && (
               <button
-                onClick={() => setDetailWindow((n) => n + 100)}
+                onClick={() => setDetailWindow((n) => n + 50)}
                 className="shrink-0 px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold"
               >
-                补全更多链接（+100）
+                补全更多链接（+50）
               </button>
             )}
           </div>

@@ -319,7 +319,7 @@ export async function fetchAlapiCallDetails(
   }
 
   let unauthorized = false;
-  await runPool(pending, 4, async (id) => {
+  await runPool(pending, 5, async (id) => {
     if (unauthorized) return;
     try {
       const d = await fetchAlapiCallDetail(token, id);
