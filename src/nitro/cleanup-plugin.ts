@@ -4,7 +4,10 @@
 // 才会加载；首页是 public/index.html 静态文件，走不到 SSR，定时器就永远不会启动。
 // Nitro 插件在 node-server 产物启动时无条件执行，是唯一可靠的时机。
 import { startCleanupScheduler } from "../lib/media-cache.server";
+import { startAlapiWarmScheduler } from "../lib/alapi-log.server";
 
 export default function mediaCleanupPlugin() {
   startCleanupScheduler();
+  // 后台慢慢把 ALAPI 的解析链接取回来存库，用户打开后台时列表直接带链接
+  startAlapiWarmScheduler();
 }

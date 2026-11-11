@@ -416,6 +416,56 @@ export async function fetchAlapiCallDetails(
   return { ok: true, details, failed };
 }
 
+// ============ 后台预热：把最近两天的解析链接提前取好 ============
+// 用户打开面板时最想要「列表里直接看到链接」，但详情接口慢且不稳，
+// 所以让服务器自己慢慢补：每 6 分钟挑 24 条还没取到的补上，存进库。
+// 详情接口不扣调用次数，只是耗服务器出口带宽和一点点时间。
+const WARM_KEY = Symbol.for("jiexi520.alapi.warm");
+const WARM_TICK_MS = 6 * 60_000;
+const WARM_BATCH = 24;
+
+export async function warmAlapiDetails(limit = WARM_BATCH): Promise<{ fetched: number; missing: number }> {
+  const token = await readAlapiToken().catch(() => "");
+  const meta = tokenMeta(token);
+  if (!meta.configured || meta.expired) return { fetched: 0, missing: 0 };
+
+  const res = await fetchAlapiCalls(2).catch(() => null);
+  if (!res?.ok) return { fetched: 0, missing: 0 };
+
+  const missing = res.calls.filter((c) => !c.url).map((c) => c.logId);
+  if (!missing.length) return { fetched: 0, missing: 0 };
+
+  const out = await fetchAlapiCallDetails(missing.slice(0, limit)).catch(() => null);
+  return { fetched: out?.details.length || 0, missing: missing.length };
+}
+
+export function startAlapiWarmScheduler(): void {
+  const host = globalThis as unknown as Record<symbol, { startedAt: number } | undefined>;
+  if (host[WARM_KEY]) return;
+  host[WARM_KEY] = { startedAt: Date.now() };
+
+  const run = () => {
+    void warmAlapiDetails()
+      .then((r) => {
+        if (r.fetched || r.missing) {
+          console.log(`[alapi-warm] fetched=${r.fetched} stillMissing=${r.missing}`);
+        }
+      })
+      .catch((err) => console.error("[alapi-warm] failed", (err as Error)?.message));
+  };
+
+  // 容器刚起来时先别和首屏抢，等 2 分钟再开始
+  const boot = setTimeout(run, 2 * 60_000);
+  const timer = setInterval(run, WARM_TICK_MS);
+  try {
+    (boot as unknown as { unref?: () => void }).unref?.();
+    (timer as unknown as { unref?: () => void }).unref?.();
+  } catch {
+    /* 忽略 */
+  }
+  console.log(`[alapi-warm] scheduler started tick=${WARM_TICK_MS / 60_000}min batch=${WARM_BATCH}`);
+}
+
 /** 免维护：每 12 小时清一次超过 45 天的详情行（不阻塞请求） */
 let lastPrune = 0;
 async function pruneOldDetails(): Promise<void> {
