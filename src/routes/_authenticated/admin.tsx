@@ -957,37 +957,88 @@ function AdminPage() {
 
 function ParseLogsPanel() {
   const fetchLogs = useServerFn(listParseLogs);
+  const [group, setGroup] = useState<"all" | "domestic" | "overseas">("all");
+  const [limit, setLimit] = useState(200);
+  const [keyword, setKeyword] = useState("");
   const { data, isLoading, refetch, isFetching, error } = useQuery({
-    queryKey: ["parse_logs"],
-    queryFn: () => fetchLogs(),
+    queryKey: ["parse_logs", group, limit],
+    queryFn: () => fetchLogs({ data: { group, limit } }),
     refetchInterval: 10_000,
   });
-  const logs = (data || []) as Array<{
-    id: string; platform: string; type: string; proxy_on: boolean;
-    url: string; status: string; message: string; created_at: string;
-  }>;
+  const allRows = data?.rows ?? [];
+  const counts = data?.counts ?? { all: 0, domestic: 0, overseas: 0 };
+  const kw = keyword.trim().toLowerCase();
+  const logs = kw
+    ? allRows.filter((l) =>
+        [l.url, l.platform, l.status, l.type, l.message].some((v) => String(v || "").toLowerCase().includes(kw)),
+      )
+    : allRows;
+
   const statusStyle = (s: string) =>
     s === "ok" ? "bg-emerald-500/20 text-emerald-300" :
     s === "start" ? "bg-slate-500/20 text-slate-300" :
     s === "need_cookies" ? "bg-amber-500/20 text-amber-300" :
     "bg-red-500/20 text-red-300";
+  const typeLabel = (t: string) =>
+    t === "parse" ? "解析" : t === "audio" ? "音频" : t === "video" ? "视频" : t || "—";
+  // /api/parse 写入的备注形如「用户 a@b.com · 国内接口 · 1820ms」，把邮箱单独拎出来展示
+  const userOf = (m: string) => (m.match(/^用户\s+(\S+)\s·/) || [])[1] || "";
+  const noteOf = (m: string) => m.replace(/^用户\s+\S+\s·\s?/, "");
+
+  const groups: Array<{ key: "all" | "domestic" | "overseas"; label: string; n: number }> = [
+    { key: "all", label: "全部", n: counts.all },
+    { key: "domestic", label: "国内视频", n: counts.domestic },
+    { key: "overseas", label: "国外视频", n: counts.overseas },
+  ];
+
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
           <h2 className="text-base font-bold">解析日志</h2>
           <p className="text-xs text-slate-400 mt-1">
-            最近 200 条国外平台解析记录（每 10 秒自动刷新）。proxy=on 表示通过后台代理；status 包含 start / ok / failed / need_cookies。
+            每次用户解析都会记一条（含链接、用户、线路、耗时），海外平台的播放/下载请求也会记 start / ok / failed。每 10 秒自动刷新。
           </p>
         </div>
-        <button
-          onClick={() => refetch()}
-          disabled={isFetching}
-          className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold disabled:opacity-50"
-        >
-          {isFetching ? "刷新中..." : "🔄 刷新"}
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            placeholder="搜索链接 / 平台 / 用户"
+            className="w-52 rounded-md bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+          />
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold disabled:opacity-50"
+          >
+            {isFetching ? "刷新中..." : "🔄 刷新"}
+          </button>
+        </div>
       </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        {groups.map((g) => (
+          <button
+            key={g.key}
+            onClick={() => { setGroup(g.key); setLimit(200); }}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+              group === g.key
+                ? "bg-indigo-500/20 border-indigo-500/60 text-indigo-200"
+                : "bg-slate-950/60 border-slate-700 text-slate-300 hover:border-slate-500"
+            }`}
+          >
+            {g.label}
+            <span className={`ml-1.5 ${group === g.key ? "text-indigo-300/80" : "text-slate-500"}`}>{g.n}</span>
+          </button>
+        ))}
+        {kw && (
+          <span className="text-xs text-slate-400">
+            已加载 {allRows.length} 条，命中 {logs.length} 条
+          </span>
+        )}
+      </div>
+
       {error ? (
         <p className="text-sm text-red-400">{(error as Error).message}</p>
       ) : isLoading ? (
@@ -997,12 +1048,13 @@ function ParseLogsPanel() {
           <table className="w-full text-sm">
             <thead className="bg-slate-900 text-slate-400">
               <tr>
-                <th className="text-left px-3 py-2">时间</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">时间</th>
                 <th className="text-left px-3 py-2">平台</th>
                 <th className="text-left px-3 py-2">类型</th>
-                <th className="text-left px-3 py-2">代理</th>
+                <th className="text-left px-3 py-2">线路</th>
                 <th className="text-left px-3 py-2">状态</th>
-                <th className="text-left px-3 py-2">URL</th>
+                <th className="text-left px-3 py-2">用户</th>
+                <th className="text-left px-3 py-2">链接</th>
                 <th className="text-left px-3 py-2">备注</th>
               </tr>
             </thead>
@@ -1012,27 +1064,62 @@ function ParseLogsPanel() {
                   <td className="px-3 py-2 text-slate-400 text-xs whitespace-nowrap">
                     {new Date(l.created_at).toLocaleString("zh-CN")}
                   </td>
-                  <td className="px-3 py-2 text-slate-200">{l.platform || "—"}</td>
-                  <td className="px-3 py-2 text-slate-300">{l.type || "—"}</td>
+                  <td className="px-3 py-2 text-slate-200 whitespace-nowrap">{l.platform || "—"}</td>
+                  <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{typeLabel(l.type)}</td>
                   <td className="px-3 py-2">
                     <span className={`px-2 py-0.5 rounded text-xs ${l.proxy_on ? "bg-blue-500/20 text-blue-300" : "bg-slate-500/20 text-slate-400"}`}>
-                      {l.proxy_on ? "on" : "off"}
+                      {l.proxy_on ? "代理" : "直连"}
                     </span>
                   </td>
                   <td className="px-3 py-2">
                     <span className={`px-2 py-0.5 rounded text-xs ${statusStyle(l.status)}`}>{l.status}</span>
                   </td>
-                  <td className="px-3 py-2 text-slate-300 text-xs max-w-[280px] truncate" title={l.url}>{l.url}</td>
-                  <td className="px-3 py-2 text-slate-400 text-xs max-w-[320px] truncate" title={l.message}>{l.message || "—"}</td>
+                  <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{userOf(l.message) || "—"}</td>
+                  <td className="px-3 py-2 text-xs max-w-[420px]">
+                    {l.url ? (
+                      <a
+                        href={l.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-indigo-300 hover:text-indigo-200 hover:underline break-all"
+                        title={l.url}
+                      >
+                        {l.url}
+                      </a>
+                    ) : (
+                      <span className="text-slate-500">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-slate-400 text-xs max-w-[320px] break-words">
+                    {noteOf(l.message) || "—"}
+                  </td>
                 </tr>
               ))}
               {logs.length === 0 && (
-                <tr><td colSpan={7} className="text-center text-slate-500 py-8">暂无日志</td></tr>
+                <tr>
+                  <td colSpan={8} className="text-center text-slate-500 py-8">
+                    {kw ? "当前筛选条件下没有匹配记录" : "暂无日志"}
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
         </div>
       )}
+
+      <div className="flex items-center justify-between mt-3">
+        <span className="text-xs text-slate-500">
+          已显示 {logs.length} 条{data?.hasMore ? "（还有更早的记录）" : "（已到最早）"}
+        </span>
+        {data?.hasMore && (
+          <button
+            onClick={() => setLimit((n) => Math.min(n + 200, 2000))}
+            className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold"
+          >
+            加载更多
+          </button>
+        )}
+      </div>
     </section>
   );
 }

@@ -18,6 +18,36 @@ function json(data: unknown, status = 200) {
   });
 }
 
+// 解析日志：后台「解析日志」页面看的就是这张表。
+// 以前只有 media-stream（海外播放/下载）会写，国内平台走上游接口直连、压根不写，
+// 所以后台一直看不到用户真正解析的链接 —— 这里补上，两条路径都记。
+async function writeParseLog(row: {
+  platform: string;
+  type: string;
+  proxy_on: boolean;
+  url: string;
+  status: string;
+  message: string;
+}) {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return;
+  try {
+    const { createClient } = await import("@supabase/supabase-js");
+    const sb = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+    await sb.from("parse_logs").insert({
+      platform: row.platform || "",
+      type: row.type,
+      proxy_on: row.proxy_on,
+      url: (row.url || "").slice(0, 500),
+      status: row.status,
+      message: (row.message || "").slice(0, 1000),
+    });
+  } catch (err) {
+    console.error("[api/parse] failed to write parse_log", err);
+  }
+}
+
 // 注意：一律按 hostname 精确匹配。用 includes("x.com") 会把 pipix.com（皮皮虾）
 // 误判成 X/Twitter，导致皮皮虾被丢给 yt-dlp → Unsupported URL → 502。
 function isOverseas(url: string): boolean {
@@ -348,22 +378,46 @@ async function handle(request: Request): Promise<Response> {
   const proxy = normStr(cfgMap.get("api_proxy"), "");
 
   // 执行解析
+  const overseas = isOverseas(url);
+  const platformName = determinePlatform(url);
+  const routeLabel = overseas ? (proxy ? "海外引擎·代理" : "海外引擎") : "国内接口";
+  const userEmail = userData.user.email || "";
+  const startedAt = Date.now();
   let result: any;
   try {
-    if (isOverseas(url)) {
+    if (overseas) {
       result = await parseOverseas(url, proxy);
     } else {
       result = await parseDomestic(url, endpoint, apiToken);
     }
   } catch (e: any) {
+    const msg = e?.message || String(e);
     console.error("[api/parse] parse failed", {
-      platform: determinePlatform(url),
-      isOverseas: isOverseas(url),
+      platform: platformName,
+      isOverseas: overseas,
       hasProxy: Boolean(proxy),
-      message: e?.message || String(e),
+      message: msg,
     });
-    return json({ error: e?.message || "解析失败" }, 502);
+    void writeParseLog({
+      platform: platformName,
+      type: "parse",
+      proxy_on: overseas && Boolean(proxy),
+      url,
+      status: "failed",
+      message: `用户 ${userEmail || "?"} · ${routeLabel} · ${Date.now() - startedAt}ms · ${msg.slice(0, 600)}`,
+    });
+    return json({ error: msg || "解析失败" }, 502);
   }
+
+  // 解析成功也记一条：这样后台能看到「哪个用户解析了哪个链接、走的哪条线路、花了多久」
+  void writeParseLog({
+    platform: platformName,
+    type: "parse",
+    proxy_on: overseas && Boolean(proxy),
+    url,
+    status: "ok",
+    message: `用户 ${userEmail || "?"} · ${routeLabel} · ${Date.now() - startedAt}ms${isRefresh ? " · 刷新直链" : ""}`,
+  });
 
   // 解析成功后扣除积分（管理员不扣）；刷新直链不扣，避免播到一半过期就被迫再花一次
   let remaining: number | null = null;

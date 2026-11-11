@@ -202,18 +202,78 @@ export const setApiConfig = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+// parse_logs.platform 的取值来自两条写入路径：
+//   - /api/public/media-stream 写入大写平台键（TIKTOK / YOUTUBE / ...）
+//   - /api/parse 写入中文平台名（抖音 / 小红书 / 通用 / ...）
+// 所以分组要把两套命名都覆盖，否则历史数据会漏。
+const OVERSEAS_PLATFORMS = [
+  "TIKTOK", "YOUTUBE", "INSTAGRAM", "FACEBOOK", "TWITTER", "VIMEO",
+  "TikTok", "YouTube", "Instagram", "Facebook", "X", "Vimeo",
+];
+const DOMESTIC_PLATFORMS = ["抖音", "小红书", "快手", "B站", "皮皮虾", "微博", "西瓜视频", "通用"];
+
+export type ParseLogRow = {
+  id: string;
+  platform: string;
+  type: string;
+  proxy_on: boolean;
+  url: string;
+  status: string;
+  message: string;
+  created_at: string;
+};
+
 export const listParseLogs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((input) =>
+    z
+      .object({
+        group: z.enum(["all", "domestic", "overseas"]).default("all"),
+        limit: z.number().int().min(1).max(2000).default(200),
+        // 游标分页：传上一页最后一行的 created_at，只取更早的记录
+        before: z.string().trim().max(40).nullish(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     await assertAdmin(supabase, userId);
-    const { data, error } = await supabase
+    const { group, limit } = data;
+    const before = data.before || undefined;
+
+    let query = supabase
       .from("parse_logs")
       .select("id, platform, type, proxy_on, url, status, message, created_at")
       .order("created_at", { ascending: false })
-      .limit(200);
+      .limit(limit);
+    if (group === "overseas") query = query.in("platform", OVERSEAS_PLATFORMS);
+    if (group === "domestic") query = query.in("platform", DOMESTIC_PLATFORMS);
+    if (before) query = query.lt("created_at", before);
+
+    // 分组计数走 count=exact + head，只回数字不回数据
+    const countOf = (g: "all" | "domestic" | "overseas") => {
+      let q = supabase.from("parse_logs").select("id", { count: "exact", head: true });
+      if (g === "overseas") q = q.in("platform", OVERSEAS_PLATFORMS);
+      if (g === "domestic") q = q.in("platform", DOMESTIC_PLATFORMS);
+      return q;
+    };
+
+    const [{ data: rows, error }, all, domestic, overseas] = await Promise.all([
+      query,
+      countOf("all"),
+      countOf("domestic"),
+      countOf("overseas"),
+    ]);
     if (error) throw new Error(error.message);
-    return data || [];
+    return {
+      rows: (rows || []) as ParseLogRow[],
+      hasMore: (rows?.length || 0) >= limit,
+      counts: {
+        all: all.count ?? 0,
+        domestic: domestic.count ?? 0,
+        overseas: overseas.count ?? 0,
+      },
+    };
   });
 
 // ============ 拉新邀请 ============
