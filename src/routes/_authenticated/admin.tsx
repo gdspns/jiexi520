@@ -1090,8 +1090,11 @@ function ParseLogsPanel() {
                       <span className="text-slate-500">—</span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-slate-400 text-xs max-w-[320px] break-words">
-                    {noteOf(l.message) || "—"}
+                  <td
+                    className="px-3 py-2 text-slate-400 text-xs max-w-[320px] break-words"
+                    title={noteOf(l.message)}
+                  >
+                    <div className="max-h-[3.2rem] overflow-hidden">{noteOf(l.message) || "—"}</div>
                   </td>
                 </tr>
               ))}
