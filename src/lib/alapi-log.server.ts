@@ -244,12 +244,18 @@ async function apiNames(token: string): Promise<Map<number, string>> {
 }
 
 // ============ 日志详情（解析链接） ============
-// 列表接口不带请求参数，链接要单独查 /api/log/detail/<log_id>。
-// 详情是只读的历史数据，一个 log_id 永远不会变，所以缓存可以无限期，只做容量上限。
+// 列表接口不带请求参数，链接要单独查 /api/log/detail/<log_id>。两个坑：
+//   1) 单条约 5 秒，吞吐只有 0.5~0.7 条/秒，只能分批慢慢补；
+//   2) 同一个 log_id 有时返回数据、有时返回「日志不存在」（ALAPI 后端不稳定），
+//      所以失败要允许以后再试，不能一锤定音。
+// 详情是只读的历史数据，取到后写进 app_settings（key = alapi_d:<log_id>），
+// 这样 Pod 重启、缓存冷却都不会丢，下次打开列表直接带着链接渲染。
+const DETAIL_KEY_PREFIX = "alapi_d:";
+const DETAIL_TTL_DAYS = 45;
 const detailCache = new Map<string, AlapiCallDetail>();
 const DETAIL_CACHE_MAX = 4000;
 
-/** 简单的并发闸门：ALAPI 账户 QPS 只有个位数，别一次打太多 */
+/** 简单的并发闸门：ALAPI 控制台接口按账号串行处理，开太多反而更慢 */
 async function runPool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
   let cursor = 0;
   const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
@@ -271,6 +277,70 @@ function parsePayload(raw: unknown): PayloadObj | null {
     return parsed && typeof parsed === "object" ? (parsed as PayloadObj) : null;
   } catch {
     return null;
+  }
+}
+
+type StoredDetail = { u?: string; t?: string; p?: string; ts?: number };
+
+function detailFromRow(logId: string, v: unknown): AlapiCallDetail | null {
+  const o = (v || {}) as StoredDetail;
+  if (typeof o.u !== "string" && typeof o.p !== "string") return null;
+  return {
+    logId,
+    url: typeof o.u === "string" ? o.u : "",
+    tokenMasked: typeof o.t === "string" ? o.t : "",
+    payload: typeof o.p === "string" ? o.p : "",
+  };
+}
+
+/** 一次查询拿回一批已知链接（首屏直接带链接渲染，不用等 ALAPI） */
+async function loadDetailsFromDb(logIds: string[]): Promise<Map<string, AlapiCallDetail>> {
+  const map = new Map<string, AlapiCallDetail>();
+  const ids = Array.from(new Set(logIds.filter(Boolean)));
+  if (!ids.length) return map;
+
+  for (const id of ids) {
+    const hit = detailCache.get(id);
+    if (hit) map.set(id, hit);
+  }
+  const missing = ids.filter((id) => !map.has(id));
+  if (!missing.length) return map;
+
+  const sb = await serviceClient();
+  if (!sb) return map;
+  try {
+    const { data } = await sb
+      .from("app_settings")
+      .select("key,value")
+      .in("key", missing.map((id) => DETAIL_KEY_PREFIX + id));
+    for (const row of data || []) {
+      const id = String((row as any).key || "").slice(DETAIL_KEY_PREFIX.length);
+      const d = detailFromRow(id, (row as any).value);
+      if (!d) continue;
+      map.set(id, d);
+      if (detailCache.size < DETAIL_CACHE_MAX) detailCache.set(id, d);
+    }
+  } catch {
+    // 读库失败就退回实时接口，不影响功能
+  }
+  return map;
+}
+
+async function saveDetailsToDb(details: AlapiCallDetail[]): Promise<void> {
+  if (!details.length) return;
+  const sb = await serviceClient();
+  if (!sb) return;
+  const now = Date.now();
+  try {
+    await sb.from("app_settings").upsert(
+      details.map((d) => ({
+        key: DETAIL_KEY_PREFIX + d.logId,
+        value: { u: d.url, t: d.tokenMasked, p: d.payload, ts: now } as any,
+        updated_at: new Date(now).toISOString(),
+      })),
+    );
+  } catch {
+    // 落库失败只影响下次是否要重取，不算错误
   }
 }
 
@@ -299,31 +369,37 @@ export async function fetchAlapiCallDetail(
   return detail;
 }
 
-/** 批量补链接；已缓存的直接命中，不发请求 */
+/** 列表渲染前预加载已知链接（单次查询，毫秒级） */
+export async function preloadDetailUrls(logIds: string[]): Promise<Map<string, string>> {
+  const map = await loadDetailsFromDb(logIds.slice(0, 120));
+  const out = new Map<string, string>();
+  for (const [id, d] of map) if (d.url) out.set(id, d.url);
+  return out;
+}
+
+/** 批量补链接；内存/库里已有的直接命中，不发请求 */
 export async function fetchAlapiCallDetails(
   logIds: string[],
 ): Promise<{ ok: boolean; error?: string; details: AlapiCallDetail[]; failed: number }> {
   const ids = Array.from(new Set(logIds.map((s) => String(s || "").trim()).filter(Boolean))).slice(0, 80);
   if (!ids.length) return { ok: true, details: [], failed: 0 };
 
+  const known = await loadDetailsFromDb(ids);
+  const details: AlapiCallDetail[] = Array.from(known.values());
+  const pending = ids.filter((id) => !known.has(id));
+  if (!pending.length) return { ok: true, details, failed: 0 };
+
   const token = await readAlapiToken().catch(() => "");
-  if (!token) return { ok: false, error: "未配置 ALAPI 凭据", details: [], failed: ids.length };
+  if (!token) return { ok: false, error: "未配置 ALAPI 凭据", details, failed: pending.length };
 
-  const details: AlapiCallDetail[] = [];
+  const fetched: AlapiCallDetail[] = [];
   let failed = 0;
-  const pending: string[] = [];
-  for (const id of ids) {
-    const hit = detailCache.get(id);
-    if (hit) details.push(hit);
-    else pending.push(id);
-  }
-
   let unauthorized = false;
-  await runPool(pending, 5, async (id) => {
+  await runPool(pending, 8, async (id) => {
     if (unauthorized) return;
     try {
       const d = await fetchAlapiCallDetail(token, id);
-      if (d) details.push(d);
+      if (d) fetched.push(d);
       else failed++;
     } catch (err: any) {
       if (String(err?.message || err) === "UNAUTHORIZED") unauthorized = true;
@@ -331,10 +407,43 @@ export async function fetchAlapiCallDetails(
     }
   });
 
+  details.push(...fetched);
+  if (fetched.length) await saveDetailsToDb(fetched);
+
   if (unauthorized && !details.length) {
     return { ok: false, error: "ALAPI 凭据已失效，请用书签同步一次", details, failed };
   }
   return { ok: true, details, failed };
+}
+
+/** 免维护：每 12 小时清一次超过 45 天的详情行（不阻塞请求） */
+let lastPrune = 0;
+async function pruneOldDetails(): Promise<void> {
+  if (Date.now() - lastPrune < 12 * 3600_000) return;
+  lastPrune = Date.now();
+  const sb = await serviceClient().catch(() => null);
+  if (!sb) return;
+  try {
+    const cutoff = Date.now() - DETAIL_TTL_DAYS * 86_400_000;
+    const { data } = await sb
+      .from("app_settings")
+      .select("key,value")
+      .like("key", `${DETAIL_KEY_PREFIX}%`)
+      .limit(4000);
+    const stale = (data || [])
+      .filter((r: any) => {
+        const ts = Number((r?.value || {}).ts || 0);
+        return ts > 0 && ts < cutoff;
+      })
+      .map((r: any) => String(r.key));
+    if (stale.length) {
+      for (let i = 0; i < stale.length; i += 200) {
+        await sb.from("app_settings").delete().in("key", stale.slice(i, i + 200));
+      }
+    }
+  } catch {
+    // 清理失败无所谓，下次再来
+  }
 }
 
 // ============ 今日额度（剩余次数） ============
@@ -505,8 +614,15 @@ export async function fetchAlapiCalls(days: number): Promise<AlapiLogResult> {
     duration: Number(r.duration_ms || 0),
     at: r.request_timestamp || "",
     source: sourceOf(r.client_ip || "", r.referer_url || ""),
-    url: detailCache.get(String(r.log_id))?.url || "",
+    url: "",
   }));
+
+  // 首屏直接带上已知链接，剩下的由前端按批补
+  const preloaded = await preloadDetailUrls(calls.map((c) => c.logId)).catch(
+    () => new Map<string, string>(),
+  );
+  for (const c of calls) c.url = preloaded.get(c.logId) || "";
+  void pruneOldDetails();
 
   // 时间倒序（接口本来就倒序，双保险）
   calls.sort((a, b) => String(b.at).localeCompare(String(a.at)));

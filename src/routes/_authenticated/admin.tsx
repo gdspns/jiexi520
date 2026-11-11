@@ -1566,7 +1566,7 @@ function AlapiCallsBody() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((c) => {
+                {rows.map((c, idx) => {
                   const d = details[c.logId];
                   const link = d?.url || c.url || "";
                   return (
@@ -1605,7 +1605,9 @@ function AlapiCallsBody() {
                             {link}
                           </a>
                         ) : (
-                          <span className="text-slate-600">{d ? "无链接参数" : "…"}</span>
+                          <span className="text-slate-600">
+                            {d ? "无链接参数" : idx < detailWindow ? "读取中…" : "待补全"}
+                          </span>
                         )}
                       </td>
                       <td className="px-3 py-2 text-slate-500 text-xs max-w-[200px] truncate" title={c.referer}>
