@@ -24,6 +24,7 @@ import { Route as ApiPublicOfficialPaymentNotifyRouteImport } from './routes/api
 import { Route as ApiPublicMediaStreamRouteImport } from './routes/api/public/media-stream'
 import { Route as ApiPublicMediaProxyRouteImport } from './routes/api/public/media-proxy'
 import { Route as ApiPublicAuthTokenRouteImport } from './routes/api/public/auth-token'
+import { Route as ApiPublicAlapiTokenRouteImport } from './routes/api/public/alapi-token'
 import { Route as ApiPublicDlNameRouteImport } from './routes/api/public/dl.$name'
 
 const AuthRoute = AuthRouteImport.update({
@@ -101,6 +102,11 @@ const ApiPublicAuthTokenRoute = ApiPublicAuthTokenRouteImport.update({
   path: '/api/public/auth-token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicAlapiTokenRoute = ApiPublicAlapiTokenRouteImport.update({
+  id: '/api/public/alapi-token',
+  path: '/api/public/alapi-token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicDlNameRoute = ApiPublicDlNameRouteImport.update({
   id: '/api/public/dl/$name',
   path: '/api/public/dl/$name',
@@ -113,6 +119,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AuthenticatedAdminRoute
   '/api/config': typeof ApiConfigRoute
   '/api/parse': typeof ApiParseRoute
+  '/api/public/alapi-token': typeof ApiPublicAlapiTokenRoute
   '/api/public/auth-token': typeof ApiPublicAuthTokenRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
@@ -130,6 +137,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AuthenticatedAdminRoute
   '/api/config': typeof ApiConfigRoute
   '/api/parse': typeof ApiParseRoute
+  '/api/public/alapi-token': typeof ApiPublicAlapiTokenRoute
   '/api/public/auth-token': typeof ApiPublicAuthTokenRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
@@ -149,6 +157,7 @@ export interface FileRoutesById {
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
   '/api/config': typeof ApiConfigRoute
   '/api/parse': typeof ApiParseRoute
+  '/api/public/alapi-token': typeof ApiPublicAlapiTokenRoute
   '/api/public/auth-token': typeof ApiPublicAuthTokenRoute
   '/api/public/media-proxy': typeof ApiPublicMediaProxyRoute
   '/api/public/media-stream': typeof ApiPublicMediaStreamRoute
@@ -168,6 +177,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/api/config'
     | '/api/parse'
+    | '/api/public/alapi-token'
     | '/api/public/auth-token'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
@@ -185,6 +195,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/api/config'
     | '/api/parse'
+    | '/api/public/alapi-token'
     | '/api/public/auth-token'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
@@ -203,6 +214,7 @@ export interface FileRouteTypes {
     | '/_authenticated/admin'
     | '/api/config'
     | '/api/parse'
+    | '/api/public/alapi-token'
     | '/api/public/auth-token'
     | '/api/public/media-proxy'
     | '/api/public/media-stream'
@@ -221,6 +233,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   ApiConfigRoute: typeof ApiConfigRoute
   ApiParseRoute: typeof ApiParseRoute
+  ApiPublicAlapiTokenRoute: typeof ApiPublicAlapiTokenRoute
   ApiPublicAuthTokenRoute: typeof ApiPublicAuthTokenRoute
   ApiPublicMediaProxyRoute: typeof ApiPublicMediaProxyRoute
   ApiPublicMediaStreamRoute: typeof ApiPublicMediaStreamRoute
@@ -340,6 +353,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicAuthTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/alapi-token': {
+      id: '/api/public/alapi-token'
+      path: '/api/public/alapi-token'
+      fullPath: '/api/public/alapi-token'
+      preLoaderRoute: typeof ApiPublicAlapiTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/dl/$name': {
       id: '/api/public/dl/$name'
       path: '/api/public/dl/$name'
@@ -368,6 +388,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   ApiConfigRoute: ApiConfigRoute,
   ApiParseRoute: ApiParseRoute,
+  ApiPublicAlapiTokenRoute: ApiPublicAlapiTokenRoute,
   ApiPublicAuthTokenRoute: ApiPublicAuthTokenRoute,
   ApiPublicMediaProxyRoute: ApiPublicMediaProxyRoute,
   ApiPublicMediaStreamRoute: ApiPublicMediaStreamRoute,
