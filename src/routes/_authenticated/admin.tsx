@@ -1050,8 +1050,8 @@ function ParseLogsPanel() {
               <tr>
                 <th className="text-left px-3 py-2 whitespace-nowrap">时间</th>
                 <th className="text-left px-3 py-2">平台</th>
-                <th className="text-left px-3 py-2">类型</th>
-                <th className="text-left px-3 py-2">线路</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">类型</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">线路</th>
                 <th className="text-left px-3 py-2">状态</th>
                 <th className="text-left px-3 py-2">用户</th>
                 <th className="text-left px-3 py-2">链接</th>
@@ -1067,12 +1067,12 @@ function ParseLogsPanel() {
                   <td className="px-3 py-2 text-slate-200 whitespace-nowrap">{l.platform || "—"}</td>
                   <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{typeLabel(l.type)}</td>
                   <td className="px-3 py-2">
-                    <span className={`px-2 py-0.5 rounded text-xs ${l.proxy_on ? "bg-blue-500/20 text-blue-300" : "bg-slate-500/20 text-slate-400"}`}>
+                    <span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded text-xs ${l.proxy_on ? "bg-blue-500/20 text-blue-300" : "bg-slate-500/20 text-slate-400"}`}>
                       {l.proxy_on ? "代理" : "直连"}
                     </span>
                   </td>
                   <td className="px-3 py-2">
-                    <span className={`px-2 py-0.5 rounded text-xs ${statusStyle(l.status)}`}>{l.status}</span>
+                    <span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded text-xs ${statusStyle(l.status)}`}>{l.status}</span>
                   </td>
                   <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{userOf(l.message) || "—"}</td>
                   <td className="px-3 py-2 text-xs max-w-[420px]">
