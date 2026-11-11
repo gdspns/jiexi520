@@ -188,7 +188,8 @@ export type AlapiLogResult = {
 };
 
 const cache = new Map<string, { at: number; result: AlapiLogResult }>();
-const CACHE_TTL = 45_000;
+// 比前端的 60 秒轮询略长，保证轮询大多命中缓存、不会每秒都打 ALAPI
+const CACHE_TTL = 90_000;
 
 export async function fetchAlapiCalls(days: number): Promise<AlapiLogResult> {
   const d = Math.min(Math.max(Math.trunc(days) || 3, 1), 7);
@@ -224,16 +225,17 @@ export async function fetchAlapiCalls(days: number): Promise<AlapiLogResult> {
 
   const start = bjYmd(d - 1);
   const end = bjYmd(0);
-  const names = await apiNames(token);
   const all: RawLog[] = [];
   let total = 0;
+  let names = new Map<number, string>();
 
   const pageUrl = (page: number) =>
     `${LOG_URL}?current=${page}&pageSize=100&start_time=${start}+00:00&end_time=${end}+23:59`;
 
   try {
-    // 先取第一页拿到总页数，剩下的并行拉——串行翻 4 页要 8 秒以上，并行后 3 秒内
-    const first = await alapiGet(token, pageUrl(1));
+    // 接口名映射和第一页并行取；拿到总页数后其余页也并行
+    const [nameMap, first] = await Promise.all([apiNames(token), alapiGet(token, pageUrl(1))]);
+    names = nameMap;
     const payload = first?.data || {};
     const firstRows: RawLog[] = Array.isArray(payload.data) ? payload.data : [];
     total = Number(payload.total ?? payload.pageInfo?.total ?? firstRows.length);
