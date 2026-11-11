@@ -2,7 +2,7 @@ import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, useEffect, useState } from "react";
-import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig, listParseLogs, getAlapiLogs, setAlapiCredential, clearAlapiCredential, getInviteReport, getInviteConfig, setInviteRewards } from "@/lib/admin.functions";
+import { listUsers, setBanned, deleteUser, adjustCredits, getSignupBonus, setSignupBonus, getApiConfig, setApiConfig, listParseLogs, getAlapiLogs, setAlapiCredential, clearAlapiCredential, getAlapiSyncKey, getInviteReport, getInviteConfig, setInviteRewards } from "@/lib/admin.functions";
 import { deleteOrder, getPaymentConfig, listOrdersAdmin, listProductsAdmin, setPaymentConfig, upsertProduct, deleteProduct } from "@/lib/payment.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { CleanupPanel } from "@/components/cleanup-panel";
@@ -1159,6 +1159,14 @@ function AlapiCallsBody() {
   const fetchCalls = useServerFn(getAlapiLogs);
   const saveCred = useServerFn(setAlapiCredential);
   const clearCred = useServerFn(clearAlapiCredential);
+  const fetchSyncKey = useServerFn(getAlapiSyncKey);
+
+  const syncKeyQ = useQuery({
+    queryKey: ["alapi_sync_key"],
+    queryFn: () => fetchSyncKey(),
+    staleTime: 600_000,
+  });
+  const syncKey = syncKeyQ.data?.key || "";
 
   const [days, setDays] = useState(3);
   const [kw, setKw] = useState("");
@@ -1235,6 +1243,14 @@ function AlapiCallsBody() {
     await refetch();
   };
 
+  // 书签：在 alapi 页面读取当前 token 并 POST 回本后台（alapi 每次打开控制台都会轮换 token，
+  // 所以「点一下书签」比手工复制粘贴省事得多）
+  const bookmarklet = syncKey
+    ? "javascript:(async()=>{try{const t=(document.cookie.match(/alapi_access_token=([^;]+)/)||[])[1]||'';if(!t){alert('没读到登录态，请先登录 alapi.cn');return}const r=await fetch('https://www.jx521.top/api/public/alapi-token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t,key:'" +
+      syncKey +
+      "'})}).then(x=>x.json());alert(r.ok?'✅ 已同步到解析后台':'❌ '+(r.message||'同步失败'))}catch(e){alert('❌ '+e.message)}})()"
+    : "";
+
   const tk = data?.token;
 
   return (
@@ -1280,13 +1296,33 @@ function AlapiCallsBody() {
       </div>
 
       {editing && (
-        <div className="rounded-lg border border-indigo-500/40 bg-indigo-500/5 p-3 space-y-2">
+        <div className="rounded-lg border border-indigo-500/40 bg-indigo-500/5 p-3 space-y-3">
+          <div className="rounded-md border border-slate-700 bg-slate-950/60 p-2.5 space-y-2">
+            <p className="text-xs text-slate-300 leading-relaxed">
+              <b className="text-emerald-300">方式一（推荐，以后一劳永逸）</b>：把下面这个按钮<b>拖到浏览器书签栏</b>。
+              以后在 alapi 任何页面点一下书签，就会把最新的登录凭据同步到本后台 —— 因为 alapi 每次打开控制台都会换新 token，
+              这也是唯一不用反复复制粘贴的办法。
+            </p>
+            <a
+              href={bookmarklet || "#"}
+              draggable
+              onClick={(e) => {
+                e.preventDefault();
+                alert("请把这个按钮拖到浏览器书签栏，然后在 alapi 页面点击它");
+              }}
+              className="inline-block px-3 py-1.5 rounded-md bg-emerald-600/20 border border-emerald-500/50 text-emerald-300 text-xs font-semibold cursor-grab active:cursor-grabbing select-none"
+            >
+              🔗 同步 ALAPI 凭据
+            </a>
+            {!syncKey && <span className="text-xs text-slate-500 ml-2">正在生成密钥…</span>}
+          </div>
+
           <p className="text-xs text-slate-300 leading-relaxed">
-            获取凭据（30 天有效）：先在浏览器登录{" "}
+            <b>方式二</b>：先在浏览器登录{" "}
             <a href="https://www.alapi.cn/" target="_blank" rel="noreferrer" className="text-indigo-300 hover:underline">
               alapi.cn
             </a>
-            ，按 <b>F12</b> 打开控制台 → <b>Console</b> → 粘贴下面这行回车，token 会自动进剪贴板：
+            ，按 <b>F12</b> 打开控制台 → <b>Console</b> → 粘贴下面这行回车，token 会自动进剪贴板，再粘到下面输入框：
           </p>
           <code className="block select-all break-all rounded bg-slate-950 border border-slate-800 px-2 py-1.5 text-[11px] text-emerald-300">
             {'copy(document.cookie.match(/alapi_access_token=([^;]+)/)?.[1]||"")'}

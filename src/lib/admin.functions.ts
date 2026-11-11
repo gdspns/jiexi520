@@ -11,6 +11,7 @@ import {
 } from "@/lib/media-cache.server";
 import {
   clearAlapiToken,
+  ensureAlapiSyncKey,
   fetchAlapiCalls,
   saveAlapiToken,
   verifyAlapiToken,
@@ -318,6 +319,15 @@ export const clearAlapiCredential = createServerFn({ method: "POST" })
     await assertAdmin(supabase, userId);
     await clearAlapiToken();
     return { ok: true };
+  });
+
+/** 一键同步书签需要的密钥 */
+export const getAlapiSyncKey = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabase, userId } = context;
+    await assertAdmin(supabase, userId);
+    return { key: await ensureAlapiSyncKey() };
   });
 
 // ============ 拉新邀请 ============

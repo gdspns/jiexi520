@@ -105,6 +105,31 @@ export async function clearAlapiToken(): Promise<void> {
   cache.clear();
 }
 
+// 一键同步用的密钥：浏览器书签带着它把最新 token POST 回来。
+// 只存在 app_settings（authenticated 全禁读），后台页面可见，泄露最坏结果是 ALAPI 日志看不了。
+const SYNC_KEY = "alapi_sync_key";
+
+export async function readAlapiSyncKey(): Promise<string> {
+  const sb = await serviceClient();
+  if (!sb) return "";
+  const { data } = await sb.from("app_settings").select("value").eq("key", SYNC_KEY).maybeSingle();
+  return typeof data?.value === "string" ? data.value : "";
+}
+
+export async function ensureAlapiSyncKey(): Promise<string> {
+  const existing = await readAlapiSyncKey();
+  if (existing) return existing;
+  const sb = await serviceClient();
+  if (!sb) return "";
+  const { randomBytes } = await import("node:crypto");
+  const key = randomBytes(16).toString("hex");
+  const { error } = await sb
+    .from("app_settings")
+    .upsert({ key: SYNC_KEY, value: key as any, updated_at: new Date().toISOString() });
+  if (error) throw new Error(error.message);
+  return key;
+}
+
 /** 北京时间当天 */
 function bjYmd(offsetDays = 0): string {
   const t = new Date(Date.now() + 8 * 3600_000 - offsetDays * 86_400_000);
@@ -187,14 +212,14 @@ export type AlapiLogResult = {
   days: number;
 };
 
-const cache = new Map<string, { at: number; result: AlapiLogResult }>();
+const cache = new Map<string, { at: number; ttl: number; result: AlapiLogResult }>();
 // 比前端的 60 秒轮询略长，保证轮询大多命中缓存、不会每秒都打 ALAPI
 const CACHE_TTL = 90_000;
 
 export async function fetchAlapiCalls(days: number): Promise<AlapiLogResult> {
   const d = Math.min(Math.max(Math.trunc(days) || 3, 1), 7);
   const hit = cache.get(String(d));
-  if (hit && Date.now() - hit.at < CACHE_TTL) return hit.result;
+  if (hit && Date.now() - hit.at < hit.ttl) return hit.result;
 
   const token = await readAlapiToken().catch(() => "");
   const meta = tokenMeta(token);
@@ -273,7 +298,7 @@ export async function fetchAlapiCalls(days: number): Promise<AlapiLogResult> {
       fetchedAt: new Date().toISOString(),
       days: d,
     };
-    cache.set(String(d), { at: Date.now(), result });
+    cache.set(String(d), { at: Date.now(), ttl: 15_000, result });
     return result;
   }
 
@@ -302,7 +327,7 @@ export async function fetchAlapiCalls(days: number): Promise<AlapiLogResult> {
     fetchedAt: new Date().toISOString(),
     days: d,
   };
-  cache.set(String(d), { at: Date.now(), result });
+  cache.set(String(d), { at: Date.now(), ttl: CACHE_TTL, result });
   return result;
 }
 
